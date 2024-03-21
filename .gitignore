@@ -1,22 +1,14 @@
-<<<<<<< HEAD
-.git
-.DS_Store
-*.log
-.env
-.env.local
-
-# Ignore the 'certs' folder
-certs/
-=======
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
 # Binaries for programs and plugins
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+.git
+.DS_Store
+*.log
+.env
+.env.local
 
 # Test binary, built with `go test -c`
 *.test
@@ -29,4 +21,3 @@ certs/
 
 # Go workspace file
 go.work
->>>>>>> 65d3ea8d3efbc7152875af3438c1fe6ebe30792c
