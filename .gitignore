@@ -18,6 +18,6 @@
 
 # Dependency directories (remove the comment below to include it)
 certs/*
-
+2.0v/certs/*
 # Go workspace file
 go.work
