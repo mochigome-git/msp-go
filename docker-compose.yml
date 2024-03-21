@@ -1,0 +1,13 @@
+version: "3.8"
+
+services:
+  nk2-msp:
+    container_name: nk3-msp
+    image: nk3-msp:1.91v
+    restart: always
+    stop_grace_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "10"
