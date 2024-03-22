@@ -90,6 +90,6 @@ License: none
 
 Source Code: [GitHub](https://github.com/mochigome-git/nk3-PLCcapture-go)
 
-Docker Hub: [mochigome/msp-i](https://hub.docker.com/repository/docker/mochigome/msp-i/general)
+Docker Hub: [mochigome/msp-c](https://hub.docker.com/repository/docker/mochigome/msp-i/general)
 
 Maintainer: [mochigome-git](https://github.com/mochigome-git)
