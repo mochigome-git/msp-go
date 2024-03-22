@@ -1,4 +1,4 @@
-# mochigome-git:msp-i
+# mochigome-git:msp-c
 
 Overview:
 This Docker image provides a solution for extracting data from Mitsubishi brand Programmable Logic Controllers (PLCs) using 1E Frame or 3C Frame communication protocols and publishing it via MQTT (Message Queuing Telemetry Transport).
