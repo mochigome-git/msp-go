@@ -24,7 +24,7 @@ version: '3'
 services:
   nk3-msp-pub:
     container_name: nk3-msp-pub
-    image: mochigome/nk3-msp:1.93v
+    image: mochigome/msp-c:2.0v
     restart: always
     logging:
       driver: "json-file"
