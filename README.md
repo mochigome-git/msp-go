@@ -39,6 +39,12 @@ services:
       DEVICES_2bit: "${DEVICES_2bit}"
       DEVICES_16bit: "${DEVICES_16bit}"
       DEVICES_32bit: "${DEVICES_32bit}"
+      MQTTS_ON: ${MQTTS_ON}
+      MQTT_CA_CERTIFICATE: ${MQTT_CA_CERTIFICATE}
+      MQTT_CLIENT_CERTIFICATE: ${MQTT_CLIENT_CERTIFICATE}
+      MQTT_PRIVATE_KEY: ${MQTT_PRIVATE_KEY}
+    volumes:
+      - ./certs:/etc/msp/certs:ro
 ```
 
 .env :
