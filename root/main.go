@@ -8,26 +8,35 @@ import (
 	"sync"
 	"time"
 
-	"nk2-PLCcapture-go/pkg/config"
-	"nk2-PLCcapture-go/pkg/mqtt"
-	"nk2-PLCcapture-go/pkg/plc"
-	"nk2-PLCcapture-go/pkg/utils"
+	"nk3-PLCcapture-go/pkg/config"
+	"nk3-PLCcapture-go/pkg/mqtt"
+	"nk3-PLCcapture-go/pkg/plc"
+	"nk3-PLCcapture-go/pkg/utils"
 
+	MQTT "github.com/eclipse/paho.mqtt.golang"
 	jsoniter "github.com/json-iterator/go"
 )
 
 var (
-	mqttHost  string
-	plcHost   string
-	plcPort   int
-	devices2  string
-	devices16 string
-	devices32 string
-	mqttTopic string
+	mqttHost       string
+	plcHost        string
+	plcPort        int
+	devices2       string
+	devices16      string
+	devices32      string
+	mqttsStr       string
+	mqttTopic      string
+	caCertFile     string
+	clientCertFile string
+	clientKeyFile  string
+	ECScaCert      string
+	ECSclientCert  string
+	ECSclientKey   string
 )
 
 func init() {
-	//config.LoadEnv(".env.local")
+	//config.LoadEnv(".env")
+	mqttsStr = os.Getenv("MQTTS_ON")
 	mqttHost = os.Getenv("MQTT_HOST")
 	plcHost = os.Getenv("PLC_HOST")
 	plcPort = config.GetEnvAsInt("PLC_PORT", 5011)
@@ -35,6 +44,12 @@ func init() {
 	devices32 = os.Getenv("DEVICES_32bit")
 	devices2 = os.Getenv("DEVICES_2bit")
 	mqttTopic = os.Getenv("MQTT_TOPIC")
+	caCertFile = os.Getenv("MQTT_CA_CERTIFICATE")
+	clientCertFile = os.Getenv("MQTT_CLIENT_CERTIFICATE")
+	clientKeyFile = os.Getenv("MQTT_PRIVATE_KEY")
+	ECScaCert = os.Getenv("ECS_MQTT_CA_CERTIFICATE")
+	ECSclientCert = os.Getenv("ECS_MQTT_CLIENT_CERTIFICATE")
+	ECSclientKey = os.Getenv("ECS_MQTT_PRIVATE_KEY")
 }
 
 func main() {
@@ -42,8 +57,20 @@ func main() {
 	// Create a logger to use for logging messages
 	logger := log.New(os.Stdout, "", log.LstdFlags)
 
-	// Connect to the MQTT server
-	mqttclient := mqtt.NewMQTTClient(mqttHost, logger)
+	// Parse the string value into a boolean, defaulting to false if parsing fails
+	mqtts, _ := strconv.ParseBool(mqttsStr)
+
+	var mqttclient MQTT.Client
+	// Create MQTT client based on whether mqtts is true or false
+	if mqtts {
+		//  verison for normal docker, docker-compose
+		//mqttclient = mqtt.NewMQTTClientWithTLS(mqttHost, caCertFile, clientCertFile, clientKeyFile, logger)
+		//  version when running in AWS ECS
+		mqttclient = mqtt.ECSNewMQTTClientWithTLS(mqttHost, ECScaCert, ECSclientCert, ECSclientKey, logger)
+	} else {
+		mqttclient = mqtt.NewMQTTClient(mqttHost, logger)
+	}
+
 	defer mqttclient.Disconnect(250)
 
 	// Parse the device addresses for 2-bit devices
