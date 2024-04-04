@@ -1,4 +1,4 @@
-module nk3-PLCcapture-go
+module msp-go
 
 go 1.21.0
 

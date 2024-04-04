@@ -8,45 +8,46 @@ import (
 	"sync"
 	"time"
 
-	"nk3-PLCcapture-go/pkg/config"
-	"nk3-PLCcapture-go/pkg/mqtt"
-	"nk3-PLCcapture-go/pkg/plc"
-	"nk3-PLCcapture-go/pkg/utils"
+	"msp-go/pkg/config"
+	"msp-go/pkg/mqtt"
+	"msp-go/pkg/plc"
+	"msp-go/pkg/utils"
 
 	MQTT "github.com/eclipse/paho.mqtt.golang"
 	jsoniter "github.com/json-iterator/go"
 )
 
 var (
-	mqttHost       string
-	plcHost        string
-	plcPort        int
-	devices2       string
-	devices16      string
-	devices32      string
-	mqttsStr       string
-	mqttTopic      string
-	caCertFile     string
-	clientCertFile string
-	clientKeyFile  string
-	ECScaCert      string
-	ECSclientCert  string
-	ECSclientKey   string
+	// PLC configure
+	plcHost      string // plcHost stores the PLC's hostname
+	plcPort      int    // plcPort stores the PLC's port number
+	fxStr        string // Mitsubishi PLC FX series true =1 false =0
+	devices16    string // store 16bit device for SLMP(Seamless Message Protocol) query
+	devices32    string // store 32bit device for SLMP(Seamless Message Protocol) query
+	devices2     string // store 2bit device for SLMP(Seamless Message Protocol) query
+	devicesAscii string // convert Ascii to text
+
+	// MQTT Broker configure
+	mqttHost      string // mqtthost stores the MQTT broker's hostname
+	mqttTopic     string // topic stores the topic of the MQTT broker
+	mqttsStr      string // Turn on for TLS connection
+	ECScaCert     string // ESC verion direct read from params store
+	ECSclientCert string // ESC verion direct read from params store
+	ECSclientKey  string // ESC verion direct read from params store
 )
 
 func init() {
-	//config.LoadEnv(".env")
-	mqttsStr = os.Getenv("MQTTS_ON")
-	mqttHost = os.Getenv("MQTT_HOST")
+	config.LoadEnv(".env.local")
 	plcHost = os.Getenv("PLC_HOST")
 	plcPort = config.GetEnvAsInt("PLC_PORT", 5011)
+	fxStr = os.Getenv("PLC_MODEL")
 	devices16 = os.Getenv("DEVICES_16bit")
 	devices32 = os.Getenv("DEVICES_32bit")
 	devices2 = os.Getenv("DEVICES_2bit")
 	mqttTopic = os.Getenv("MQTT_TOPIC")
-	caCertFile = os.Getenv("MQTT_CA_CERTIFICATE")
-	clientCertFile = os.Getenv("MQTT_CLIENT_CERTIFICATE")
-	clientKeyFile = os.Getenv("MQTT_PRIVATE_KEY")
+	devicesAscii = os.Getenv("DEVICES_ASCII")
+	mqttHost = os.Getenv("MQTT_HOST")
+	mqttsStr = os.Getenv("MQTTS_ON")
 	ECScaCert = os.Getenv("ECS_MQTT_CA_CERTIFICATE")
 	ECSclientCert = os.Getenv("ECS_MQTT_CLIENT_CERTIFICATE")
 	ECSclientKey = os.Getenv("ECS_MQTT_PRIVATE_KEY")
@@ -70,37 +71,31 @@ func main() {
 	} else {
 		mqttclient = mqtt.NewMQTTClient(mqttHost, logger)
 	}
-
 	defer mqttclient.Disconnect(250)
 
-	// Parse the device addresses for 2-bit devices
-	devices2Parsed, err := utils.ParseDeviceAddresses(devices2, logger)
-	if err != nil {
-		logger.Fatalf("Error parsing device addresses: %v", err)
-	}
-
 	// Parse the device addresses for 16-bit devices
-	devices16Parsed, err := utils.ParseDeviceAddresses(devices16, logger)
-	if err != nil {
-		logger.Fatalf("Error parsing device addresses: %v", err)
-	}
+	devices16Parsed, _ := ParseAndLogError(devices16, logger)
+	devices32Parsed, _ := ParseAndLogError(devices32, logger)
+	devices2Parsed, _ := ParseAndLogError(devices2, logger)
+	devicesAsciiParsed, _ := ParseAndLogError(devicesAscii, logger)
 
-	// Parse the device addresses for 32-bit devices
-	devices32Parsed, err := utils.ParseDeviceAddresses(devices32, logger)
-	if err != nil {
-		logger.Fatalf("Error parsing device addresses: %v", err)
+	// Set fx to false as default
+	fx, err := strconv.ParseBool(fxStr)
+	if err != nil || fxStr == "fx" {
+		fx = (fxStr == "fx") // Set fx to true if fxStr equals "fx"
+		// Handle the error, for example, set a default value or log a message
+		logger.Println("Error parsing fx:", err)
 	}
 
 	// Combine the 2-bit, 16-bit and 32-bit devices into a single slice
-	devices := append(devices2Parsed, devices16Parsed...)
-	devices = append(devices, devices32Parsed...)
+	devices := append(devices16Parsed, append(append(devices2Parsed, devices32Parsed...), devicesAsciiParsed...)...)
 
 	// Initialize the MSP client
 	err = plc.InitMSPClient(plcHost, plcPort)
 	if err != nil {
 		logger.Fatalf("Failed to initialize MSP client: %v", err)
 	} else {
-		log.Printf("Start collecting data from %s", plcHost)
+		logger.Printf("Start collecting data from %s", plcHost)
 	}
 
 	for {
@@ -144,18 +139,18 @@ func main() {
 				for _, device := range devices {
 					select {
 					case <-ctx.Done():
-						logger.Printf("%s timed out. error: %s\n", device.DeviceType+strconv.Itoa(int(device.DeviceNumber)), ctx.Err())
+						logger.Printf("%s timed out. error: %s\n", device.DeviceType+device.DeviceNumber, ctx.Err())
 						logger.Println("Program terminated by os.Exit")
 						os.Exit(1)
 						return
 					default:
-						value, err := ReadDataWithContext(ctx, device.DeviceType, device.DeviceNumber, device.NumberRegisters)
+						value, err := ReadDataWithContext(ctx, device.DeviceType, device.DeviceNumber, device.NumberRegisters, fx)
 						if err != nil {
-							logger.Printf("Error reading data from PLC for device %s: %s", device.DeviceType+strconv.Itoa(int(device.DeviceNumber)), err)
-							break
+							logger.Printf("Error reading data from PLC for device %s: %s", device.DeviceType+device.DeviceNumber, err)
+							break // Skip this device and move to the next
 						}
 						message := map[string]interface{}{
-							"address": device.DeviceType + strconv.Itoa(int(device.DeviceNumber)),
+							"address": device.DeviceType + device.DeviceNumber,
 							"value":   value,
 						}
 						dataCh <- message
@@ -174,16 +169,24 @@ func main() {
 
 }
 
-func ReadDataWithContext(ctx context.Context, deviceType string, deviceNumber uint16, numRegisters uint16) (value interface{}, err error) {
+func ReadDataWithContext(ctx context.Context, deviceType string, deviceNumber string, numRegisters uint16, fx bool) (value interface{}, err error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
 		// Perform the actual data reading operation
-		value, err = plc.ReadData(ctx, deviceType, deviceNumber, numRegisters)
+		value, err = plc.ReadData(ctx, deviceType, deviceNumber, numRegisters, fx)
 		if err != nil {
 			return nil, err
 		}
 		return value, nil
 	}
+}
+
+func ParseAndLogError(devices string, logger *log.Logger) ([]utils.Device, error) {
+	parsed, err := utils.ParseDeviceAddresses(devices, logger)
+	if err != nil {
+		logger.Printf("Error parsing device addresses: %v", err)
+	}
+	return parsed, err
 }
