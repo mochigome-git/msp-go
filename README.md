@@ -88,8 +88,8 @@ Note: Ensure that appropriate network configurations and security measures are i
 
 License: none
 
-Source Code: [GitHub](https://github.com/mochigome-git/nk3-PLCcapture-go)
+Source Code: [GitHub](https://github.com/mochigome-git/msp-go/tree/main)
 
-Docker Hub: [mochigome/msp-go](https://hub.docker.com/repository/docker/mochigome/msp-i/general)
+Docker Hub: [mochigome/msp-go](https://hub.docker.com/repository/docker/mochigome/msp-go/general)
 
 Maintainer: [mochigome-git](https://github.com/mochigome-git)
