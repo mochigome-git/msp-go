@@ -1,4 +1,4 @@
-# mochigome-git:msp-c
+# mochigome-git:msp-go
 
 Overview:
 This Docker image provides a solution for extracting data from Mitsubishi brand Programmable Logic Controllers (PLCs) using 1E Frame or 3C Frame communication protocols and publishing it via MQTT (Message Queuing Telemetry Transport).
@@ -24,7 +24,7 @@ version: '3'
 services:
   nk3-msp-pub:
     container_name: nk3-msp-pub
-    image: mochigome/msp-c:2.0v
+    image: mochigome/msp-go:2.0v
     restart: always
     logging:
       driver: "json-file"
@@ -88,8 +88,8 @@ Note: Ensure that appropriate network configurations and security measures are i
 
 License: none
 
-Source Code: [GitHub](https://github.com/mochigome-git/nk3-PLCcapture-go)
+Source Code: [GitHub](https://github.com/mochigome-git/msp-go/tree/main)
 
-Docker Hub: [mochigome/msp-c](https://hub.docker.com/repository/docker/mochigome/msp-i/general)
+Docker Hub: [mochigome/msp-go](https://hub.docker.com/repository/docker/mochigome/msp-go/general)
 
 Maintainer: [mochigome-git](https://github.com/mochigome-git)
