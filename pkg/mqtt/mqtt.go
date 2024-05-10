@@ -24,7 +24,7 @@ func PublishMessage(client MQTT.Client, topic string, message string, logger *lo
 	if token.Error() != nil {
 		logger.Printf("Error publishing message to topic %s: %s", topic, token.Error())
 	} else {
-		logger.Printf("Published message to topic %s: %s", topic, message)
+		//logger.Printf("Published message to topic %s: %s", topic, message)
 	}
 }
 

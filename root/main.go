@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"strconv"
 	"sync"
@@ -19,6 +21,7 @@ import (
 
 var (
 	// PLC configure
+	profilling   int    // pprof server port
 	plcHost      string // plcHost stores the PLC's hostname
 	plcPort      int    // plcPort stores the PLC's port number
 	fxStr        string // Mitsubishi PLC FX series true =1 false =0
@@ -37,7 +40,8 @@ var (
 )
 
 func init() {
-	config.LoadEnv(".env.local")
+	//config.LoadEnv(".env.local")
+	profilling = config.GetEnvAsInt("PPROFT_PORT", 6060)
 	plcHost = os.Getenv("PLC_HOST")
 	plcPort = config.GetEnvAsInt("PLC_PORT", 5011)
 	fxStr = os.Getenv("PLC_MODEL")
@@ -54,6 +58,30 @@ func init() {
 }
 
 func main() {
+	// Register the profiling handlers with the default HTTP server mux.
+	// This will serve the profiling endpoints at /debug/pprof.
+	/**
+	Memory profile: http://localhost:6060/debug/pprof/heap
+	Goroutine profile: http://localhost:6060/debug/pprof/goroutine
+	CPU profile: http://localhost:6060/debug/pprof/profile
+
+	Download leap data:
+	curl http://192.168.0.126:6060/debug/pprof/heap > heap.out
+	open with pprof tools:
+	go tool pprof heap.out
+	command:
+	top, list, png
+
+	**/
+
+	// Start profiling server
+	go func() {
+		//profilingAddr := "192.168.0.126:" + strconv.Itoa(profilling)
+		profilingAddr := "127.0.0.1:" + strconv.Itoa(profilling)
+		if err := http.ListenAndServe(profilingAddr, nil); err != nil {
+			log.Fatalf("Error starting profiling server: %v", err)
+		}
+	}()
 
 	// Create a logger to use for logging messages
 	logger := log.New(os.Stdout, "", log.LstdFlags)
@@ -99,41 +127,23 @@ func main() {
 	}
 
 	for {
-		workerCount := 15
 		// Use a buffered channel to store the data to be processed
-		dataCh := make(chan map[string]interface{}, workerCount) // Buffered channel with capacity equal to the number of workers
+		workerCount := 15
+		dataCh := make(chan map[string]interface{})
 
 		// Start the worker goroutines before reading data from the devices
 		// Spawn multiple worker goroutines that read the data from the channel, process it, and send it to MQTT
 		var wg sync.WaitGroup
-		wg.Add(workerCount)
-
 		for i := 0; i < workerCount; i++ {
-			go func() {
-				defer wg.Done()
-				for message := range dataCh {
-
-					// Convert the message to a JSON string
-					messageJSON, err := jsoniter.Marshal(message)
-					if err != nil {
-						logger.Printf("Error marshaling message to JSON:%s", err)
-						continue
-					}
-
-					// Publish the message to the MQTT server
-					topic := mqttTopic + message["address"].(string)
-					mqtt.PublishMessage(mqttclient, topic, string(messageJSON), logger)
-				}
-			}()
+			wg.Add(1)
+			go workerRoutine(dataCh, &wg, mqttclient, logger)
 		}
 
 		// Run the main loop in a separate goroutine
 		go func() {
 			for {
-
-				// Initialize the context with a timeout of 20 seconds
-				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-				defer cancel()
+				// Create a new context with a timeout of 10 seconds for each iteration
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 
 				// Read data from devices and send it to dataCh
 				for _, device := range devices {
@@ -141,13 +151,13 @@ func main() {
 					case <-ctx.Done():
 						logger.Printf("%s timed out. error: %s\n", device.DeviceType+device.DeviceNumber, ctx.Err())
 						logger.Println("Program terminated by os.Exit")
+						cancel() // Cancel context to release resources
 						os.Exit(1)
-						return
 					default:
 						value, err := ReadDataWithContext(ctx, device.DeviceType, device.DeviceNumber, device.NumberRegisters, fx)
 						if err != nil {
 							logger.Printf("Error reading data from PLC for device %s: %s", device.DeviceType+device.DeviceNumber, err)
-							break // Skip this device and move to the next
+							continue // Skip this device and move to the next
 						}
 						message := map[string]interface{}{
 							"address": device.DeviceType + device.DeviceNumber,
@@ -156,7 +166,12 @@ func main() {
 						dataCh <- message
 					}
 				}
-
+				// Cancel context to release resources
+				cancel()
+				// Check if context was canceled, if so, break out of loop
+				if ctx.Err() != nil {
+					break
+				}
 			}
 		}()
 
@@ -167,6 +182,23 @@ func main() {
 
 	}
 
+}
+
+func workerRoutine(dataCh <-chan map[string]interface{}, wg *sync.WaitGroup, mqttclient MQTT.Client, logger *log.Logger) {
+	defer wg.Done()
+	for message := range dataCh {
+
+		// Convert the message to a JSON string
+		messageJSON, err := jsoniter.Marshal(message)
+		if err != nil {
+			logger.Printf("Error marshaling message to JSON:%s", err)
+			continue
+		}
+
+		// Publish the message to the MQTT server
+		topic := mqttTopic + message["address"].(string)
+		mqtt.PublishMessage(mqttclient, topic, string(messageJSON), logger)
+	}
 }
 
 func ReadDataWithContext(ctx context.Context, deviceType string, deviceNumber string, numRegisters uint16, fx bool) (value interface{}, err error) {
