@@ -126,61 +126,62 @@ func main() {
 		logger.Printf("Start collecting data from %s", plcHost)
 	}
 
-	for {
-		// Use a buffered channel to store the data to be processed
-		workerCount := 15
-		dataCh := make(chan map[string]interface{})
+	//for {
+	// Use a buffered channel to store the data to be processed
+	workerCount := 15
+	dataCh := make(chan map[string]interface{})
 
-		// Start the worker goroutines before reading data from the devices
-		// Spawn multiple worker goroutines that read the data from the channel, process it, and send it to MQTT
-		var wg sync.WaitGroup
-		for i := 0; i < workerCount; i++ {
-			wg.Add(1)
-			go workerRoutine(dataCh, &wg, mqttclient, logger)
-		}
+	// Start the worker goroutines before reading data from the devices
+	// Spawn multiple worker goroutines that read the data from the channel, process it, and send it to MQTT
+	var wg sync.WaitGroup
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go workerRoutine(dataCh, &wg, mqttclient, logger)
+	}
 
-		// Run the main loop in a separate goroutine
-		go func() {
-			for {
-				// Create a new context with a timeout of 10 seconds for each iteration
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Run the main loop in a separate goroutine
+	go func() {
+		for {
+			// Create a new context with a timeout of 10 seconds for each iteration
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 
-				// Read data from devices and send it to dataCh
-				for _, device := range devices {
-					select {
-					case <-ctx.Done():
-						logger.Printf("%s timed out. error: %s\n", device.DeviceType+device.DeviceNumber, ctx.Err())
-						logger.Println("Program terminated by os.Exit")
-						cancel() // Cancel context to release resources
-						os.Exit(1)
-					default:
-						value, err := ReadDataWithContext(ctx, device.DeviceType, device.DeviceNumber, device.NumberRegisters, fx)
-						if err != nil {
-							logger.Printf("Error reading data from PLC for device %s: %s", device.DeviceType+device.DeviceNumber, err)
-							continue // Skip this device and move to the next
-						}
-						message := map[string]interface{}{
-							"address": device.DeviceType + device.DeviceNumber,
-							"value":   value,
-						}
-						dataCh <- message
+			// Read data from devices and send it to dataCh
+			for _, device := range devices {
+				select {
+				case <-ctx.Done():
+					logger.Printf("%s timed out. error: %s\n", device.DeviceType+device.DeviceNumber, ctx.Err())
+					logger.Println("Program terminated by os.Exit")
+					//cancel() // Cancel context to release resources
+					os.Exit(1)
+					continue
+				default:
+					value, err := ReadDataWithContext(ctx, device.DeviceType, device.DeviceNumber, device.NumberRegisters, fx)
+					if err != nil {
+						logger.Printf("Error reading data from PLC for device %s: %s", device.DeviceType+device.DeviceNumber, err)
+						continue // Skip this device and move to the next
 					}
-				}
-				// Cancel context to release resources
-				cancel()
-				// Check if context was canceled, if so, break out of loop
-				if ctx.Err() != nil {
-					break
+					message := map[string]interface{}{
+						"address": device.DeviceType + device.DeviceNumber,
+						"value":   value,
+					}
+					dataCh <- message
 				}
 			}
-		}()
+			//// Cancel context to release resources
+			cancel()
+			//// Check if context was canceled, if so, break out of loop
+			//if ctx.Err() != nil {
+			//	break
+			//}
+		}
+	}()
 
-		<-dataCh
+	<-dataCh
 
-		// dataCh is closed, all workers are done
-		wg.Wait()
+	// dataCh is closed, all workers are done
+	wg.Wait()
 
-	}
+	//}
 
 }
 
