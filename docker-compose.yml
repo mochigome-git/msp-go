@@ -1,9 +1,9 @@
 version: "3.8"
 
 services:
-  nk2-msp:
-    container_name: nk3-msp
-    image: nk3-msp:1.91v
+  msp:
+    container_name: msp-go
+    image: mochigome/msp-go:2.15v.ecs
     restart: always
     stop_grace_period: 30s
     logging:
