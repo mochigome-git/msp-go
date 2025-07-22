@@ -133,7 +133,7 @@ func ParseData(data []byte, numberRegisters int, fx bool) (any, error) {
 		for i, b := range data {
 			val |= uint16(b) << (8 * i)
 		}
-		text := fmt.Sprintf("%X", val)
+		text := fmt.Sprintf("%04X", val)
 		hexBytes, err := hex.DecodeString(text)
 		if err != nil {
 			return nil, fmt.Errorf("error decoding hexadecimal string: %w", err)

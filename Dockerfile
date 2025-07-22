@@ -1,6 +1,6 @@
 # Stage 1: Build the Go program
 FROM golang:1.24-alpine AS build
-WORKDIR /opt/nk3-PLCcapture-go
+WORKDIR /opt/msp-go
 
 # Copy the project files and build the program
 COPY . .
@@ -12,7 +12,7 @@ RUN cd root && \
 FROM alpine:3.21
 RUN apk --no-cache add ca-certificates
 WORKDIR /app
-COPY --from=build /opt/nk3-PLCcapture-go/root/mainroot /app/
+COPY --from=build /opt/msp-go/root/mainroot /app/
 
 RUN chmod +x /app/mainroot
 
@@ -21,6 +21,6 @@ CMD ["/app/mainroot"]
 # Build Image with command
 # docker build -t msp-go:${version} .
 # docker tag  msp-go:${version} mochigome/msp-go:${version}
-# docker push mochigome/ msp-go:tagname
+# docker push mochigome/msp-go:tagname
 
-# current version : 2.15v.ecs
+# current version : 2.151v.ecs
