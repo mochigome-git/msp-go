@@ -8,12 +8,12 @@ import (
 	"strconv"
 	"time"
 
-	"msp-go/internal/app/profiler"
-	"msp-go/internal/app/worker"
-	"msp-go/pkg/config"
-	"msp-go/pkg/mqtt"
-	"msp-go/pkg/plc"
-	"msp-go/pkg/utils"
+	"github.com/mochigome-git/msp-go/internal/app/profiler"
+	"github.com/mochigome-git/msp-go/internal/app/worker"
+	"github.com/mochigome-git/msp-go/pkg/config"
+	"github.com/mochigome-git/msp-go/pkg/mqtt"
+	"github.com/mochigome-git/msp-go/pkg/plc"
+	"github.com/mochigome-git/msp-go/pkg/utils"
 
 	MQTT "github.com/eclipse/paho.mqtt.golang"
 )

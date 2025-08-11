@@ -4,8 +4,8 @@ import (
 	"log"
 	"sync"
 
-	"msp-go/pkg/config"
-	"msp-go/pkg/mqtt"
+	"github.com/mochigome-git/msp-go/pkg/config"
+	"github.com/mochigome-git/msp-go/pkg/mqtt"
 
 	MQTT "github.com/eclipse/paho.mqtt.golang"
 	jsoniter "github.com/json-iterator/go"

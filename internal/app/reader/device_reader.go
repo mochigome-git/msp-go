@@ -3,8 +3,9 @@ package reader
 import (
 	"context"
 	"fmt"
-	"msp-go/pkg/plc"
-	"msp-go/pkg/utils"
+
+	"github.com/mochigome-git/msp-go/pkg/plc"
+	"github.com/mochigome-git/msp-go/pkg/utils"
 )
 
 type DeviceReader interface {

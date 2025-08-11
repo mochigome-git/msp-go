@@ -4,17 +4,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"log"
-	"msp-go/internal/app/monitor"
-	"msp-go/pkg/config"
+
+	"github.com/mochigome-git/msp-go/internal/app/monitor"
+	"github.com/mochigome-git/msp-go/pkg/config"
 
 	MQTT "github.com/eclipse/paho.mqtt.golang"
-)
-
-var (
-	totalMessages      uint64
-	lastSecondMessages uint64
-	maxPerSecond       uint64
-	started            int32
 )
 
 func NewMQTTClient(mqttHost string, logger *log.Logger) MQTT.Client {

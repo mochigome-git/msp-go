@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"msp-go/pkg/mcp"
+	"github.com/mochigome-git/msp-go/pkg/mcp"
 )
 
 type mspClient struct {

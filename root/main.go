@@ -8,8 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"msp-go/internal/app"
-	"msp-go/pkg/config"
+	"github.com/mochigome-git/msp-go/internal/app"
+	"github.com/mochigome-git/msp-go/pkg/config"
 )
 
 // Register the profiling handlers with the default HTTP server mux.
