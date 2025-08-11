@@ -1,4 +1,4 @@
-module msp-go
+module github.com/mochigome-git/msp-go
 
 go 1.23.0
 
