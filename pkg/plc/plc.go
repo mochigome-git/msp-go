@@ -32,13 +32,13 @@ func InitMSPClient(plcHost string, plcPort int) error {
 }
 
 // ReadData reads data from the PLC for the specified device.
-func ReadData(ctx context.Context, deviceType string, deviceNumber string, numberRegisters uint16, fx bool) (interface{}, error) {
+func ReadData(ctx context.Context, deviceType string, deviceNumber string, numberRegisters uint16, fx bool) (any, error) {
 	if msp == nil {
 		return nil, fmt.Errorf("MSP client not initialized")
 	}
 
 	// Create a channel to receive the result or context cancellation
-	resultCh := make(chan interface{})
+	resultCh := make(chan any)
 	errCh := make(chan error)
 
 	deviceNumberInt64, err := strconv.ParseInt(deviceNumber, 10, 64)
@@ -181,4 +181,92 @@ func WriteData(deviceType string, deviceNumber string, numberRegisters uint16, w
 	// Call the low-level Write function
 	_, err = msp.client.Write(deviceType, deviceNumberInt64, int64(numberRegisters), writeData)
 	return err
+}
+
+// EncodeData encodes a value string into a byte slice for PLC writing,
+// based on the expected number of registers and data type.
+func EncodeData(valueStr string, numberRegisters int) ([]byte, error) {
+	valueStr = strings.TrimSpace(valueStr)
+
+	switch numberRegisters {
+	case 1: // 16-bit unsigned or signed int (we use uint16 here)
+		// Parse as int
+		val, err := strconv.ParseUint(valueStr, 10, 16)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse uint16: %w", err)
+		}
+		data := make([]byte, 2)
+		data[0] = byte(val & 0xFF)
+		data[1] = byte((val >> 8) & 0xFF)
+		return data, nil
+
+	case 2: // 32-bit float (like ParseData case 2)
+		fval, err := strconv.ParseFloat(valueStr, 32)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse float32: %w", err)
+		}
+		bits := math.Float32bits(float32(fval))
+		data := make([]byte, 4)
+		for i := range data {
+			data[i] = byte(bits >> (8 * i) & 0xFF)
+		}
+		return data, nil
+
+	case 3: // 2-bit device (single bit)
+		// Accept "true"/"false" or "1"/"0"
+		val := byte(0x00)
+		switch strings.ToLower(valueStr) {
+		case "true", "1", "on":
+			val = 0x01
+		case "false", "0", "off":
+			val = 0x00
+		default:
+			return nil, fmt.Errorf("invalid bit value: %s", valueStr)
+		}
+		return []byte{val}, nil
+
+	case 4: // ASCII hex device
+		// ValueStr expected to be a hex string (e.g. "1A3F")
+		hexStr := strings.TrimSpace(valueStr)
+		if len(hexStr)%2 != 0 {
+			hexStr = "0" + hexStr // pad if needed
+		}
+		data, err := hex.DecodeString(hexStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode hex string: %w", err)
+		}
+		// If data length is less than registers*2, pad with zeros
+		expectedLen := numberRegisters * 2
+		if len(data) < expectedLen {
+			padded := make([]byte, expectedLen)
+			copy(padded[expectedLen-len(data):], data) // right-align bytes
+			return padded, nil
+		}
+		return data, nil
+
+	case 5: // 16-bit signed int
+		val, err := strconv.ParseInt(valueStr, 10, 16)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse int16: %w", err)
+		}
+		data := make([]byte, 2)
+		data[0] = byte(val & 0xFF)
+		data[1] = byte((val >> 8) & 0xFF)
+		return data, nil
+
+	case 6: // 2-bit device for fx (special case, treat as uint16 divided by 10)
+		// Assume the value is an integer or float representing the device value * 10
+		fval, err := strconv.ParseFloat(valueStr, 64)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse float for fx device: %w", err)
+		}
+		ival := uint16(fval * 10)
+		data := make([]byte, 2)
+		data[0] = byte(ival & 0xFF)
+		data[1] = byte((ival >> 8) & 0xFF)
+		return data, nil
+
+	default:
+		return nil, fmt.Errorf("unsupported number of registers: %d", numberRegisters)
+	}
 }
