@@ -121,11 +121,11 @@ func WriteData(deviceType string, deviceNumber string, writeData []byte, numberR
 // numberRegisters: number of points to write.
 // writeData: the data to be written as a byte slice.
 // BatchWrite get wrap-around (overflow) and jump to lower device (reverse)
-
 func BatchWrite(deviceType string, startDevice string, writeData []byte, maxRegistersPerWrite uint16, logger *log.Logger) error {
 	var deviceNumberUint16 uint16
 	var err error
 
+	// Parse device number differently for Y (hex) vs others (decimal)
 	if deviceType == "Y" {
 		val64, err := strconv.ParseInt(startDevice, 16, 64)
 		if err != nil {
@@ -157,8 +157,8 @@ func BatchWrite(deviceType string, startDevice string, writeData []byte, maxRegi
 		}
 
 		chunk := writeData[startIndex:endIndex]
+		addr := deviceNumberUint16 - uint16(written)
 
-		addr := deviceNumberUint16 + uint16(written)
 		logger.Printf("Writing to %s device number %d, chunk size %d, data % X\n", deviceType, addr, chunkSize, chunk)
 
 		_, err = msp.client.Write(deviceType, int64(addr), int64(chunkSize), chunk)
