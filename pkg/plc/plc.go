@@ -229,13 +229,18 @@ func EncodeData(valueStr string, numberRegisters int) ([]byte, error) {
 		return []byte{val}, nil
 
 	case 4: // ASCII hex device
-		// For writing, treat valueStr as raw ASCII, not actual hex
 		asciiBytes := []byte(valueStr)
+
+		// Calculate how many registers are needed (2 bytes per register)
+		numberRegisters = (len(asciiBytes) + 1) / 2 // auto-adjust
+
+		// Pad with spaces if odd length so each register has 2 bytes
 		if len(asciiBytes) < numberRegisters*2 {
 			padded := make([]byte, numberRegisters*2)
 			copy(padded, asciiBytes)
 			asciiBytes = padded
 		}
+
 		return asciiBytes, nil
 
 	case 5: // 16-bit signed int
