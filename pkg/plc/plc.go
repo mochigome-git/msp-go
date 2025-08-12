@@ -231,12 +231,22 @@ func EncodeData(valueStr string, numberRegisters int) ([]byte, error) {
 	case 4: // ASCII hex device
 		// For writing, treat valueStr as raw ASCII, not actual hex
 		asciiBytes := []byte(valueStr)
-		if len(asciiBytes) < numberRegisters*2 {
-			padded := make([]byte, numberRegisters*2)
+
+		// Pad with spaces if not enough bytes
+		neededBytes := numberRegisters * 2
+		if len(asciiBytes) < neededBytes {
+			padded := make([]byte, neededBytes)
 			copy(padded, asciiBytes)
 			asciiBytes = padded
+		} else if len(asciiBytes) > neededBytes {
+			asciiBytes = asciiBytes[:neededBytes]
 		}
-		return asciiBytes, nil
+
+		// Now arrange into PLC word order (high byte first)
+		data := make([]byte, neededBytes)
+		copy(data, asciiBytes)
+
+		return data, nil
 
 	case 5: // 16-bit signed int
 		val, err := strconv.ParseInt(valueStr, 10, 16)
