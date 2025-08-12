@@ -189,6 +189,34 @@ func WriteData(deviceType string, deviceNumber string, writeData []byte, numberR
 	return err
 }
 
+// WriteData sends data to the PLC for the specified device.
+// deviceType: device code (e.g. "D", "M", "Y").
+// deviceNumber: starting device address (string, can be decimal or hex depending on device).
+// numberRegisters: number of points to write.
+// writeData: the data to be written as a byte slice.
+func WriteDataWords(deviceType string, deviceNumber string, values []uint16) error {
+	if msp == nil {
+		return fmt.Errorf("MSP client not initialized")
+	}
+
+	deviceNumberInt64, err := strconv.ParseInt(deviceNumber, 10, 64)
+	if err != nil || deviceType == "Y" {
+		deviceNumberInt64, err = strconv.ParseInt(deviceNumber, 16, 64)
+		if err != nil {
+			return err
+		}
+	}
+
+	data := make([]byte, len(values)*2)
+	for i, val := range values {
+		data[i*2] = byte(val & 0xFF)
+		data[i*2+1] = byte((val >> 8) & 0xFF)
+	}
+
+	_, err = msp.client.Write(deviceType, deviceNumberInt64, int64(len(values)), data)
+	return err
+}
+
 // EncodeData encodes a value string into a byte slice for PLC writing,
 // based on the expected number of registers and data type.
 func EncodeData(valueStr string, ProcessNumber int) ([]byte, error) {
