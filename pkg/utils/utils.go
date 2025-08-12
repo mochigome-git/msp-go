@@ -42,29 +42,3 @@ func ParseDeviceAddresses(envVar string, logger *log.Logger) ([]Device, error) {
 	logger.Printf("Loaded %d device(s) from DEVICES environment variable", len(devices))
 	return devices, nil
 }
-
-func ParseWriteDeviceAddresses(upsertStr string) ([]Device, error) {
-	parts := strings.Split(upsertStr, ",")
-	if len(parts)%4 != 0 {
-		return nil, fmt.Errorf("invalid device upsert format")
-	}
-
-	devices := make([]Device, 0, len(parts)/4)
-	for i := 0; i < len(parts); i += 4 {
-		numRegs, err := strconv.ParseUint(strings.TrimSpace(parts[i+2]), 10, 16)
-		if err != nil {
-			return nil, err
-		}
-		maxRegs, err := strconv.ParseUint(strings.TrimSpace(parts[i+3]), 10, 16)
-		if err != nil {
-			return nil, err
-		}
-		devices = append(devices, Device{
-			DeviceType:      strings.TrimSpace(parts[i]),
-			DeviceNumber:    strings.TrimSpace(parts[i+1]),
-			ProcessNumber:   uint16(numRegs),
-			NumberRegisters: uint16(maxRegs),
-		})
-	}
-	return devices, nil
-}
