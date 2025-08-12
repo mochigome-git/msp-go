@@ -59,3 +59,39 @@ func TestWriteData_ASCIIRegisters(t *testing.T) {
 func SetMspClientMock(client mcp.Client) {
 	msp = &mspClient{client: client}
 }
+
+func TestBatchWrite(t *testing.T) {
+	mockMCP := new(mockClient)
+
+	// Create dummy data 10 registers (20 bytes)
+	writeData := make([]byte, 20)
+	for i := 0; i < 20; i++ {
+		writeData[i] = byte(i + 1)
+	}
+
+	// maxRegistersPerWrite = 4, so batch write 4 registers at a time (8 bytes)
+	maxRegisters := int64(4)
+
+	// Expect Write calls for 3 batches:
+	// Batch 1: deviceNumber 10, 4 registers, bytes 0-7
+	mockMCP.On("Write", "W", int64(10), int64(4), writeData[0:8]).
+		Return([]byte{}, nil).
+		Once()
+
+	// Batch 2: deviceNumber 14, 4 registers, bytes 8-15
+	mockMCP.On("Write", "W", int64(14), int64(4), writeData[8:16]).
+		Return([]byte{}, nil).
+		Once()
+
+	// Batch 3: deviceNumber 18, 2 registers, bytes 16-19 (last chunk)
+	mockMCP.On("Write", "W", int64(18), int64(2), writeData[16:20]).
+		Return([]byte{}, nil).
+		Once()
+
+	SetMspClientMock(mockMCP)
+
+	err := BatchWrite("W", "10", writeData, maxRegisters)
+	assert.NoError(t, err)
+
+	mockMCP.AssertExpectations(t)
+}

@@ -207,8 +207,14 @@ func BatchWrite(deviceType string, startDevice string, writeData []byte, maxRegi
 		if chunkSize > maxRegistersPerWrite {
 			chunkSize = maxRegistersPerWrite
 		}
+
 		startIndex := written * 2
 		endIndex := startIndex + chunkSize*2
+
+		// Clamp endIndex to avoid slice bounds panic
+		if endIndex > int64(len(writeData)) {
+			endIndex = int64(len(writeData))
+		}
 
 		chunk := writeData[startIndex:endIndex]
 
