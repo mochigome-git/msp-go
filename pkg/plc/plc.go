@@ -240,15 +240,15 @@ func EncodeData(valueStr string, numberRegisters int) ([]byte, error) {
 			asciiBytes = asciiBytes[:neededBytes]
 		}
 
-		// Rearrange into big-endian words for PLC
+		// Pack into words (low byte first in each register)
 		data := make([]byte, neededBytes)
 		for i := 0; i < neededBytes; i += 2 {
 			if i+1 < len(asciiBytes) {
-				data[i] = asciiBytes[i]     // high byte
-				data[i+1] = asciiBytes[i+1] // low byte
+				data[i] = asciiBytes[i+1] // low byte
+				data[i+1] = asciiBytes[i] // high byte
 			} else {
-				data[i] = asciiBytes[i]
-				data[i+1] = 0
+				data[i] = 0
+				data[i+1] = asciiBytes[i]
 			}
 		}
 
