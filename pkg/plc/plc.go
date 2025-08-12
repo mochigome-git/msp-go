@@ -164,15 +164,12 @@ func ParseData(data []byte, numberRegisters int, fx bool) (any, error) {
 // deviceNumber: starting device address (string, can be decimal or hex depending on device).
 // numberRegisters: number of points to write.
 // writeData: the data to be written as a byte slice.
-func WriteData(deviceType string, deviceNumber string, writeData []byte) error {
+func WriteData(deviceType string, deviceNumber string, numberRegisters uint16, writeData []byte) error {
 	if msp == nil {
 		return fmt.Errorf("MSP client not initialized")
 	}
 
-	// Each PLC register = 2 bytes
-	numberRegisters := (len(writeData) + 1) / 2
-
-	// Parse device number (hex for Y type, decimal otherwise)
+	// Convert deviceNumber to int64 (supports hex for certain device types)
 	deviceNumberInt64, err := strconv.ParseInt(deviceNumber, 10, 64)
 	if err != nil || deviceType == "Y" {
 		deviceNumberInt64, err = strconv.ParseInt(deviceNumber, 16, 64)
@@ -181,7 +178,7 @@ func WriteData(deviceType string, deviceNumber string, writeData []byte) error {
 		}
 	}
 
-	// Write to consecutive registers
+	// Call the low-level Write function
 	_, err = msp.client.Write(deviceType, deviceNumberInt64, int64(numberRegisters), writeData)
 	return err
 }
