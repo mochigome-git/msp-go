@@ -226,23 +226,14 @@ func EncodeData(valueStr string, numberRegisters int) ([]byte, error) {
 		return []byte{val}, nil
 
 	case 4: // ASCII hex device
-		// ValueStr expected to be a hex string (e.g. "1A3F")
-		hexStr := strings.TrimSpace(valueStr)
-		if len(hexStr)%2 != 0 {
-			hexStr = "0" + hexStr // pad if needed
+		// For writing, treat valueStr as raw ASCII, not actual hex
+		asciiBytes := []byte(valueStr)
+		if len(asciiBytes) < numberRegisters*2 {
+			padded := make([]byte, numberRegisters*2)
+			copy(padded, asciiBytes)
+			asciiBytes = padded
 		}
-		data, err := hex.DecodeString(hexStr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode hex string: %w", err)
-		}
-		// If data length is less than registers*2, pad with zeros
-		expectedLen := numberRegisters * 2
-		if len(data) < expectedLen {
-			padded := make([]byte, expectedLen)
-			copy(padded[expectedLen-len(data):], data) // right-align bytes
-			return padded, nil
-		}
-		return data, nil
+		return asciiBytes, nil
 
 	case 5: // 16-bit signed int
 		val, err := strconv.ParseInt(valueStr, 10, 16)
