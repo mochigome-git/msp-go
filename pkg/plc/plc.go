@@ -188,10 +188,10 @@ func WriteData(deviceType string, deviceNumber string, writeData []byte) error {
 
 // EncodeData encodes a value string into a byte slice for PLC writing,
 // based on the expected number of registers and data type.
-func EncodeData(valueStr string, numberRegisters int) ([]byte, error) {
+func EncodeData(valueStr string, ProcessNumber int) ([]byte, error) {
 	valueStr = strings.TrimSpace(valueStr)
 
-	switch numberRegisters {
+	switch ProcessNumber {
 	case 1: // 16-bit unsigned or signed int (we use uint16 here)
 		// Parse as int
 		val, err := strconv.ParseUint(valueStr, 10, 16)
@@ -228,15 +228,15 @@ func EncodeData(valueStr string, numberRegisters int) ([]byte, error) {
 		}
 		return []byte{val}, nil
 
-	case 4: // ASCII hex device
+	case 4: // ASCII device
 		asciiBytes := []byte(valueStr)
 
-		// Calculate how many registers are needed (2 bytes per register)
-		numberRegisters = (len(asciiBytes) + 1) / 2 // auto-adjust
+		// Calculate needed bytes (2 bytes per register)
+		neededBytes := ((len(asciiBytes) + 1) / 2) * 2 // round up to even length
 
-		// Pad with spaces if odd length so each register has 2 bytes
-		if len(asciiBytes) < numberRegisters*2 {
-			padded := make([]byte, numberRegisters*2)
+		// Pad if shorter
+		if len(asciiBytes) < neededBytes {
+			padded := make([]byte, neededBytes)
 			copy(padded, asciiBytes)
 			asciiBytes = padded
 		}
@@ -266,6 +266,6 @@ func EncodeData(valueStr string, numberRegisters int) ([]byte, error) {
 		return data, nil
 
 	default:
-		return nil, fmt.Errorf("unsupported number of registers: %d", numberRegisters)
+		return nil, fmt.Errorf("unsupported number of registers: %d", ProcessNumber)
 	}
 }

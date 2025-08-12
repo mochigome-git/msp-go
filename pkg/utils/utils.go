@@ -11,6 +11,7 @@ import (
 type Device struct {
 	DeviceType      string
 	DeviceNumber    string
+	ProcessNumber   uint16
 	NumberRegisters uint16
 }
 
