@@ -114,6 +114,13 @@ func WriteData(deviceType string, deviceNumber string, writeData []byte, numberR
 	return err
 }
 
+// WriteData sends data to the PLC for the specified device.
+// deviceType: device code (e.g. "D", "M", "Y").
+// deviceNumber: starting device address (string, can be decimal or hex depending on device).
+// numberRegisters: number of points to write.
+// writeData: the data to be written as a byte slice.
+// BatchWrite get wrap-around (overflow) and jump to lower device (reverse)
+
 func BatchWrite(deviceType string, startDevice string, writeData []byte, maxRegistersPerWrite uint16) error {
 	var deviceNumberUint16 uint16
 	var err error
