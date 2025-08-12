@@ -228,10 +228,10 @@ func EncodeData(valueStr string, numberRegisters int) ([]byte, error) {
 		}
 		return []byte{val}, nil
 
-	case 4: // ASCII hex device
+	case 4: // ASCII device
 		asciiBytes := []byte(valueStr)
+		neededBytes := int(numberRegisters) * 2
 
-		neededBytes := numberRegisters * 2
 		if len(asciiBytes) < neededBytes {
 			padded := make([]byte, neededBytes)
 			copy(padded, asciiBytes)
@@ -240,19 +240,8 @@ func EncodeData(valueStr string, numberRegisters int) ([]byte, error) {
 			asciiBytes = asciiBytes[:neededBytes]
 		}
 
-		// Pack into words (low byte first in each register)
-		data := make([]byte, neededBytes)
-		for i := 0; i < neededBytes; i += 2 {
-			if i+1 < len(asciiBytes) {
-				data[i] = asciiBytes[i+1] // low byte
-				data[i+1] = asciiBytes[i] // high byte
-			} else {
-				data[i] = 0
-				data[i+1] = asciiBytes[i]
-			}
-		}
-
-		return data, nil
+		// No swapping — keep big-endian
+		return asciiBytes, nil
 
 	case 5: // 16-bit signed int
 		val, err := strconv.ParseInt(valueStr, 10, 16)
