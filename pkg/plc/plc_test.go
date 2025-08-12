@@ -70,7 +70,7 @@ func TestBatchWrite(t *testing.T) {
 	}
 
 	// maxRegistersPerWrite = 4, so batch write 4 registers at a time (8 bytes)
-	maxRegisters := int64(4)
+	maxRegisters := uint16(4)
 
 	// Expect Write calls for 3 batches:
 	// Batch 1: deviceNumber 10, 4 registers, bytes 0-7

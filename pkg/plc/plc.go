@@ -2,11 +2,9 @@ package plc
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
-	"math"
 	"strconv"
-	"strings"
+	"unicode"
 
 	"github.com/mochigome-git/msp-go/pkg/mcp"
 )
@@ -86,79 +84,6 @@ func ReadData(ctx context.Context, deviceType string, deviceNumber string, numbe
 	}
 }
 
-// ParseData parses the data based on the specified number of registers and fx condition
-func ParseData(data []byte, numberRegisters int, fx bool) (any, error) {
-	registerBinary, _ := mcp.NewParser().Do(data)
-	if fx {
-		registerBinary, _ = mcp.NewParser().DoFx(data)
-	}
-	data = registerBinary.Payload
-
-	switch numberRegisters {
-	case 1: // 16-bit unsigned
-		var val uint16
-		for i, b := range data {
-			val |= uint16(b) << (8 * i)
-		}
-		return val, nil
-	case 2: // 32-bit device (handles negative floats)
-		var val uint32
-		for i, b := range data {
-			val |= uint32(b) << (8 * i)
-		}
-		floatValue := math.Float32frombits(val)
-		// Format to 6 decimal places and take first 6 significant digits
-		floatString := fmt.Sprintf("%.6f", floatValue)
-		var builder strings.Builder
-		digitsCount := 0
-		for _, c := range floatString {
-			if c == '-' || c == '.' {
-				builder.WriteRune(c)
-			} else if digitsCount < 6 {
-				builder.WriteRune(c)
-				digitsCount++
-			}
-		}
-		return builder.String(), nil
-
-	case 3: // 2-bit device
-		var val uint8
-		if len(data) >= 1 {
-			val = uint8(data[0] & 0x01)
-		}
-		return val, nil
-
-	case 4: // ASCII hex device
-		var val uint16
-		for i, b := range data {
-			val |= uint16(b) << (8 * i)
-		}
-		text := fmt.Sprintf("%04X", val)
-		hexBytes, err := hex.DecodeString(text)
-		if err != nil {
-			return nil, fmt.Errorf("error decoding hexadecimal string: %w", err)
-		}
-		return string(hexBytes), nil
-
-	case 5: // 16-bit signed (handles negative values)
-		var val int16
-		for i, b := range data {
-			val |= int16(b) << (8 * i)
-		}
-		return val, nil
-
-	case 6: // 2-bit device for fx
-		var val uint16
-		for i, b := range data {
-			val |= uint16(b/10) << (8 * i)
-		}
-		return val, nil
-
-	default:
-		return nil, fmt.Errorf("invalid number of registers: %d", numberRegisters)
-	}
-}
-
 // WriteData sends data to the PLC for the specified device.
 // deviceType: device code (e.g. "D", "M", "Y").
 // deviceNumber: starting device address (string, can be decimal or hex depending on device).
@@ -189,125 +114,96 @@ func WriteData(deviceType string, deviceNumber string, writeData []byte, numberR
 	return err
 }
 
-func BatchWrite(deviceType string, startDevice string, writeData []byte, maxRegistersPerWrite int64) error {
-	deviceNumberInt64, err := strconv.ParseInt(startDevice, 10, 64)
-	if err != nil || deviceType == "Y" {
-		deviceNumberInt64, err = strconv.ParseInt(startDevice, 16, 64)
+func BatchWrite(deviceType string, startDevice string, writeData []byte, maxRegistersPerWrite uint16) error {
+	var deviceNumberUint16 uint16
+	var err error
+
+	if deviceType == "Y" {
+		val64, err := strconv.ParseInt(startDevice, 16, 64)
 		if err != nil {
 			return err
 		}
+		deviceNumberUint16 = uint16(val64)
+	} else {
+		val64, err := strconv.ParseInt(startDevice, 10, 64)
+		if err != nil {
+			return err
+		}
+		deviceNumberUint16 = uint16(val64)
 	}
 
-	totalRegisters := int64((len(writeData) + 1) / 2)
-	written := int64(0)
+	totalRegisters := (len(writeData) + 1) / 2
+	written := 0
 
 	for written < totalRegisters {
 		remaining := totalRegisters - written
 		chunkSize := remaining
-		if chunkSize > maxRegistersPerWrite {
-			chunkSize = maxRegistersPerWrite
+		if chunkSize > int(maxRegistersPerWrite) {
+			chunkSize = int(maxRegistersPerWrite)
 		}
 
 		startIndex := written * 2
 		endIndex := startIndex + chunkSize*2
-
-		// Clamp endIndex to avoid slice bounds panic
-		if endIndex > int64(len(writeData)) {
-			endIndex = int64(len(writeData))
+		if endIndex > len(writeData) {
+			endIndex = len(writeData)
 		}
 
 		chunk := writeData[startIndex:endIndex]
 
-		_, err = msp.client.Write(deviceType, deviceNumberInt64+written, chunkSize, chunk)
+		addr := deviceNumberUint16 + uint16(written)
+		fmt.Printf("Writing to %s device number %d, chunk size %d, data % X\n", deviceType, addr, chunkSize, chunk)
+
+		_, err = msp.client.Write(deviceType, int64(addr), int64(chunkSize), chunk)
 		if err != nil {
 			return err
 		}
+
 		written += chunkSize
 	}
 
 	return nil
 }
 
-// EncodeData encodes a value string into a byte slice for PLC writing,
-// based on the expected number of registers and data type.
-func EncodeData(valueStr string, ProcessNumber int) ([]byte, error) {
-	valueStr = strings.TrimSpace(valueStr)
+// IncrementDevice increments a device string like "W10" to "W11"
+func IncrementDevice(device string, offset int64) (string, error) {
+	// Separate the alphabetic prefix from the numeric suffix
+	var prefix string
+	var numStr string
 
-	switch ProcessNumber {
-	case 1: // 16-bit unsigned or signed int (we use uint16 here)
-		// Parse as int
-		val, err := strconv.ParseUint(valueStr, 10, 16)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse uint16: %w", err)
+	for i, r := range device {
+		if unicode.IsDigit(r) || (r >= 'A' && r <= 'F') { // allow hex digits if needed
+			prefix = device[:i]
+			numStr = device[i:]
+			break
 		}
-		data := make([]byte, 2)
-		data[0] = byte(val & 0xFF)
-		data[1] = byte((val >> 8) & 0xFF)
-		return data, nil
-
-	case 2: // 32-bit float (like ParseData case 2)
-		fval, err := strconv.ParseFloat(valueStr, 32)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse float32: %w", err)
-		}
-		bits := math.Float32bits(float32(fval))
-		data := make([]byte, 4)
-		for i := range data {
-			data[i] = byte(bits >> (8 * i) & 0xFF)
-		}
-		return data, nil
-
-	case 3: // 2-bit device (single bit)
-		// Accept "true"/"false" or "1"/"0"
-		val := byte(0x00)
-		switch strings.ToLower(valueStr) {
-		case "true", "1", "on":
-			val = 0x01
-		case "false", "0", "off":
-			val = 0x00
-		default:
-			return nil, fmt.Errorf("invalid bit value: %s", valueStr)
-		}
-		return []byte{val}, nil
-
-	case 4: // ASCII device
-		asciiBytes := []byte(valueStr)
-
-		// Calculate needed bytes (2 bytes per register)
-		neededBytes := ((len(asciiBytes) + 1) / 2) * 2 // round up to even length
-
-		// Pad if shorter
-		if len(asciiBytes) < neededBytes {
-			padded := make([]byte, neededBytes)
-			copy(padded, asciiBytes)
-			asciiBytes = padded
-		}
-
-		return asciiBytes, nil
-
-	case 5: // 16-bit signed int
-		val, err := strconv.ParseInt(valueStr, 10, 16)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse int16: %w", err)
-		}
-		data := make([]byte, 2)
-		data[0] = byte(val & 0xFF)
-		data[1] = byte((val >> 8) & 0xFF)
-		return data, nil
-
-	case 6: // 2-bit device for fx (special case, treat as uint16 divided by 10)
-		// Assume the value is an integer or float representing the device value * 10
-		fval, err := strconv.ParseFloat(valueStr, 64)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse float for fx device: %w", err)
-		}
-		ival := uint16(fval * 10)
-		data := make([]byte, 2)
-		data[0] = byte(ival & 0xFF)
-		data[1] = byte((ival >> 8) & 0xFF)
-		return data, nil
-
-	default:
-		return nil, fmt.Errorf("unsupported number of registers: %d", ProcessNumber)
 	}
+
+	if prefix == "" {
+		// If no prefix found, assume all numeric
+		numStr = device
+	}
+
+	// Parse numeric part as int64
+	// You might want to support hex parsing for 'Y' devices
+	var base int = 10
+	if prefix == "Y" {
+		base = 16
+	}
+	num, err := strconv.ParseInt(numStr, base, 64)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse device number part: %w", err)
+	}
+
+	// Add offset
+	num += offset
+
+	// Format back with prefix
+	var newNumStr string
+	if base == 16 {
+		newNumStr = fmt.Sprintf("%X", num)
+	} else {
+		newNumStr = fmt.Sprintf("%d", num)
+	}
+
+	return prefix + newNumStr, nil
 }
