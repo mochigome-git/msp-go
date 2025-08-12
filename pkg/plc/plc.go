@@ -229,10 +229,8 @@ func EncodeData(valueStr string, numberRegisters int) ([]byte, error) {
 		return []byte{val}, nil
 
 	case 4: // ASCII hex device
-		// For writing, treat valueStr as raw ASCII, not actual hex
 		asciiBytes := []byte(valueStr)
 
-		// Pad with spaces if not enough bytes
 		neededBytes := numberRegisters * 2
 		if len(asciiBytes) < neededBytes {
 			padded := make([]byte, neededBytes)
@@ -242,9 +240,17 @@ func EncodeData(valueStr string, numberRegisters int) ([]byte, error) {
 			asciiBytes = asciiBytes[:neededBytes]
 		}
 
-		// Now arrange into PLC word order (high byte first)
+		// Rearrange into big-endian words for PLC
 		data := make([]byte, neededBytes)
-		copy(data, asciiBytes)
+		for i := 0; i < neededBytes; i += 2 {
+			if i+1 < len(asciiBytes) {
+				data[i] = asciiBytes[i]     // high byte
+				data[i+1] = asciiBytes[i+1] // low byte
+			} else {
+				data[i] = asciiBytes[i]
+				data[i+1] = 0
+			}
+		}
 
 		return data, nil
 
