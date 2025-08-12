@@ -125,7 +125,7 @@ func BatchWrite(deviceType string, startDevice string, writeData []byte, maxRegi
 	var deviceNumberUint16 uint16
 	var err error
 
-	// Parse device number differently for Y (hex) vs others (decimal)
+	// Parse device number (hex for "Y", decimal for others)
 	if deviceType == "Y" {
 		val64, err := strconv.ParseInt(startDevice, 16, 64)
 		if err != nil {
@@ -143,6 +143,9 @@ func BatchWrite(deviceType string, startDevice string, writeData []byte, maxRegi
 	totalRegisters := (len(writeData) + 1) / 2
 	written := 0
 
+	// Start from the highest address (startDevice + totalRegisters - 1)
+	currentAddr := deviceNumberUint16 + uint16(totalRegisters-1)
+
 	for written < totalRegisters {
 		remaining := totalRegisters - written
 		chunkSize := remaining
@@ -150,18 +153,19 @@ func BatchWrite(deviceType string, startDevice string, writeData []byte, maxRegi
 			chunkSize = int(maxRegistersPerWrite)
 		}
 
-		startIndex := len(writeData) - (written * 2) - (chunkSize * 2)
+		// Calculate chunk indices (still forward in data, but written backward to device)
+		startIndex := written * 2
 		endIndex := startIndex + chunkSize*2
-		if startIndex < 0 {
-			startIndex = 0
+		if endIndex > len(writeData) {
+			endIndex = len(writeData)
 		}
 
 		chunk := writeData[startIndex:endIndex]
-		addr := deviceNumberUint16 - uint16(written) - uint16(chunkSize)
 
-		logger.Printf("Writing to %s device number %d, chunk size %d, data % X\n", deviceType, addr, chunkSize, chunk)
+		// Write from currentAddr backward
+		logger.Printf("Writing to %s device number %d, chunk size %d, data % X\n", deviceType, currentAddr-uint16(written), chunkSize, chunk)
 
-		_, err = msp.client.Write(deviceType, int64(addr), int64(chunkSize), chunk)
+		_, err = msp.client.Write(deviceType, int64(currentAddr-uint16(written)), int64(chunkSize), chunk)
 		if err != nil {
 			return err
 		}
