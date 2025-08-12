@@ -3,6 +3,7 @@ package plc
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"unicode"
 
@@ -121,7 +122,7 @@ func WriteData(deviceType string, deviceNumber string, writeData []byte, numberR
 // writeData: the data to be written as a byte slice.
 // BatchWrite get wrap-around (overflow) and jump to lower device (reverse)
 
-func BatchWrite(deviceType string, startDevice string, writeData []byte, maxRegistersPerWrite uint16) error {
+func BatchWrite(deviceType string, startDevice string, writeData []byte, maxRegistersPerWrite uint16, logger *log.Logger) error {
 	var deviceNumberUint16 uint16
 	var err error
 
@@ -158,7 +159,7 @@ func BatchWrite(deviceType string, startDevice string, writeData []byte, maxRegi
 		chunk := writeData[startIndex:endIndex]
 
 		addr := deviceNumberUint16 + uint16(written)
-		fmt.Printf("Writing to %s device number %d, chunk size %d, data % X\n", deviceType, addr, chunkSize, chunk)
+		logger.Printf("Writing to %s device number %d, chunk size %d, data % X\n", deviceType, addr, chunkSize, chunk)
 
 		_, err = msp.client.Write(deviceType, int64(addr), int64(chunkSize), chunk)
 		if err != nil {

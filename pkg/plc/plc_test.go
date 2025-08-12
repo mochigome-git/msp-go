@@ -90,7 +90,7 @@ func TestBatchWrite(t *testing.T) {
 
 	SetMspClientMock(mockMCP)
 
-	err := BatchWrite("W", "10", writeData, maxRegisters)
+	err := BatchWrite("W", "10", writeData, maxRegisters, nil)
 	assert.NoError(t, err)
 
 	mockMCP.AssertExpectations(t)
