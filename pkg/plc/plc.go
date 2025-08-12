@@ -178,11 +178,14 @@ func WriteData(deviceType string, deviceNumber string, writeData []byte, numberR
 		}
 	}
 
-	// Always recalc correct number of registers
+	// Ensure numPoints matches data length (2 bytes per register)
 	calculatedRegisters := (len(writeData) + 1) / 2
+	if numberRegisters == 0 || int(numberRegisters) < calculatedRegisters {
+		numberRegisters = uint16(calculatedRegisters)
+	}
 
 	// Write to consecutive registers
-	_, err = msp.client.Write(deviceType, deviceNumberInt64, int64(calculatedRegisters), writeData)
+	_, err = msp.client.Write(deviceType, deviceNumberInt64, int64(numberRegisters), writeData)
 	return err
 }
 
