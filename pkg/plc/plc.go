@@ -228,44 +228,31 @@ func EncodeData(valueStr string, numberRegisters int) ([]byte, error) {
 		}
 		return []byte{val}, nil
 
-	case 4: // ASCII or ASCII-hex device
-		// Auto-detect: if valueStr contains any non-hex characters or odd length → treat as ASCII
-		isHex := true
-		clean := strings.TrimSpace(valueStr)
-		if len(clean)%2 != 0 {
-			isHex = false
-		} else {
-			for _, c := range clean {
-				if !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')) {
-					isHex = false
-					break
-				}
-			}
-		}
-
-		if isHex {
-			// Interpret as real hex bytes
-			hexBytes, err := hex.DecodeString(clean)
-			if err != nil {
-				return nil, err
-			}
-			// Pad if shorter than expected
-			if len(hexBytes) < numberRegisters*2 {
-				padded := make([]byte, numberRegisters*2)
-				copy(padded, hexBytes)
-				hexBytes = padded
-			}
-			return hexBytes, nil
-		}
-
-		// Otherwise treat as ASCII directly
+	case 4: // ASCII hex device
 		asciiBytes := []byte(valueStr)
-		if len(asciiBytes) < numberRegisters*2 {
-			padded := make([]byte, numberRegisters*2)
+
+		neededBytes := numberRegisters * 2
+		if len(asciiBytes) < neededBytes {
+			padded := make([]byte, neededBytes)
 			copy(padded, asciiBytes)
 			asciiBytes = padded
+		} else if len(asciiBytes) > neededBytes {
+			asciiBytes = asciiBytes[:neededBytes]
 		}
-		return asciiBytes, nil
+
+		// Rearrange into big-endian words for PLC
+		data := make([]byte, neededBytes)
+		for i := 0; i < neededBytes; i += 2 {
+			if i+1 < len(asciiBytes) {
+				data[i] = asciiBytes[i]     // high byte
+				data[i+1] = asciiBytes[i+1] // low byte
+			} else {
+				data[i] = asciiBytes[i]
+				data[i+1] = 0
+			}
+		}
+
+		return data, nil
 
 	case 5: // 16-bit signed int
 		val, err := strconv.ParseInt(valueStr, 10, 16)
