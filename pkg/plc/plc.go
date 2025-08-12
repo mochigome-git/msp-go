@@ -150,14 +150,14 @@ func BatchWrite(deviceType string, startDevice string, writeData []byte, maxRegi
 			chunkSize = int(maxRegistersPerWrite)
 		}
 
-		startIndex := written * 2
+		startIndex := len(writeData) - (written * 2) - (chunkSize * 2)
 		endIndex := startIndex + chunkSize*2
-		if endIndex > len(writeData) {
-			endIndex = len(writeData)
+		if startIndex < 0 {
+			startIndex = 0
 		}
 
 		chunk := writeData[startIndex:endIndex]
-		addr := deviceNumberUint16 - uint16(written)
+		addr := deviceNumberUint16 - uint16(written) - uint16(chunkSize)
 
 		logger.Printf("Writing to %s device number %d, chunk size %d, data % X\n", deviceType, addr, chunkSize, chunk)
 
