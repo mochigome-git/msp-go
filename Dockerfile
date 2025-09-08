@@ -19,8 +19,15 @@ RUN chmod +x /app/mainroot
 CMD ["/app/mainroot"]
 
 # Build Image with command
+# docker buildx create --use
+# docker buildx build \
+#   --platform linux/amd64,linux/arm64 \
+#   -t mochigome/msp-go:2.2v.ecs \
+#   --push .
+
+# legacy build
 # docker build -t msp-go:${version} .
 # docker tag  msp-go:${version} mochigome/msp-go:${version}
 # docker push mochigome/msp-go:tagname
 
-# current version : 2.151v.ecs
+# current version : 2.2v.ecs
