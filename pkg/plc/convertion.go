@@ -78,6 +78,18 @@ func ParseData(data []byte, numberRegisters int, fx bool) (any, error) {
 		}
 		return val, nil
 
+	case 7: // 32-bit signed integer
+		if len(data) < 4 {
+			return nil, fmt.Errorf("not enough data for int32: got %d bytes", len(data))
+		}
+
+		var val int32
+		for i, b := range data[:4] {
+			val |= int32(b) << (8 * i)
+		}
+
+		return val, nil
+
 	default:
 		return nil, fmt.Errorf("invalid number of registers: %d", numberRegisters)
 	}

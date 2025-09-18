@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/hex"
 	"fmt"
+	"log"
 	"net"
 	"sync"
 )
@@ -53,7 +54,7 @@ func (c *client3E) Read(deviceName string, offset int64, numPoints int64, fx boo
 	if c.conn == nil {
 		conn, err := net.DialTCP("tcp", nil, c.tcpAddr)
 		if err != nil {
-			return nil, err
+			log.Fatalf("❌ Failed to connect to PLC at %s: %v", c.tcpAddr.String(), err)
 		}
 		c.conn = conn
 	}

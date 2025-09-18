@@ -26,8 +26,8 @@ CMD ["/app/mainroot"]
 #   --push .
 
 # legacy build
-# docker build -t msp-go:${version} .
-# docker tag  msp-go:${version} mochigome/msp-go:${version}
-# docker push mochigome/msp-go:tagname
+# docker build -t msp-go:2.21v.ecs .
+# docker tag  msp-go:2.21v.ecs mochigome/msp-go:2.21v.ecs
+# docker push mochigome/msp-go:2.21v.ecs
 
-# current version : 2.2v.ecs
+# current version : 2.21v.ecs
