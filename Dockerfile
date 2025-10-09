@@ -26,8 +26,12 @@ CMD ["/app/mainroot"]
 #   --push .
 
 # legacy build
-# docker build -t msp-go:2.21v.ecs .
-# docker tag  msp-go:2.21v.ecs mochigome/msp-go:2.21v.ecs
-# docker push mochigome/msp-go:2.21v.ecs
+# docker build -t msp-go:2.22v.ecs .
+# docker tag  msp-go:2.22v.ecs mochigome/msp-go:2.22v.ecs
+# docker push mochigome/msp-go:2.22v.ecs
 
-# current version : 2.21v.ecs
+# AWS ECR
+# docker tag msp-go:2.22v.ecs 590183751536.dkr.ecr.ap-southeast-1.amazonaws.com/msp-go:2.22v.ecs
+# docker push 590183751536.dkr.ecr.ap-southeast-1.amazonaws.com/msp-go:2.22v.ecs
+
+# current version : 2.22v.ecs

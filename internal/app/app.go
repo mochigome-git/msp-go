@@ -2,9 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"time"
 
@@ -91,26 +91,34 @@ func (a *Application) Run(ctx context.Context) error {
 }
 
 func (a *Application) readAndEnqueue(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
 	for _, device := range a.devices {
-		select {
-		case <-ctx.Done():
-			a.logger.Printf("%s timed out: %s", device.DeviceType+device.DeviceNumber, ctx.Err())
-			os.Exit(1)
-		default:
-			val, err := readDataWithContext(ctx, device, a.fx)
-			if err != nil {
-				a.logger.Printf("Failed to read from %s: %v", device.DeviceType+device.DeviceNumber, err)
+		// per-device timeout
+		devCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+
+		val, err := readDataWithContext(devCtx, device, a.fx)
+		cancel() // release resources as soon as read is done
+
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				a.logger.Printf("Timeout reading %s, skipping", device.DeviceType+device.DeviceNumber)
+				continue
+				// uncomment this when running in docker container (comment continue)
+				// os.Exit(1)
+
+			}
+			if errors.Is(err, context.Canceled) {
+				a.logger.Printf("Read from %s canceled", device.DeviceType+device.DeviceNumber)
 				continue
 			}
-			msg := map[string]any{
-				"address": device.DeviceType + device.DeviceNumber,
-				"value":   val,
-			}
-			a.workerPool.Enqueue(msg)
+			a.logger.Printf("Failed to read from %s: %v", device.DeviceType+device.DeviceNumber, err)
+			continue
 		}
+
+		msg := map[string]any{
+			"address": device.DeviceType + device.DeviceNumber,
+			"value":   val,
+		}
+		a.workerPool.Enqueue(msg)
 	}
 }
 
