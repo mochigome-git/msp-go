@@ -7,6 +7,7 @@ import (
 	"log"
 	"strconv"
 	"time"
+	"strings"
 
 	MQTT "github.com/eclipse/paho.mqtt.golang"
 	"github.com/mochigome-git/msp-go/internal/app/profiler"
@@ -19,6 +20,7 @@ import (
 	PLC_Utils "github.com/mochigome-git/msp-go/pkg/utils"
 )
 
+
 // Application is the main app handling both reading (MQTT → PLC) and writing (PLC → MQTT)
 type Application struct {
 	cfg        config.AppConfig
@@ -26,20 +28,27 @@ type Application struct {
 	logger     *log.Logger
 	mqttClient MQTT.Client
 	devices    []PLC_Utils.Device
+	destDevices []PLC_Utils.Device
 	workerPool *worker.Pool
 	fx         bool
 	client     MCP.Client
 }
+
 
 // NewApplication initializes MQTT, PLC, devices, and returns the app instance
 func NewApplication(cfg config.AppConfig, cfgPlc config.PlcConfig, logger *log.Logger) (*Application, error) {
 	mqtts, _ := strconv.ParseBool(cfg.MqttsStr)
 
 	var mqttClient MQTT.Client
-	if mqtts {
-		mqttClient = mqtt.ECSNewMQTTClientWithTLS(cfg, logger)
+	if !cfg.MqttSkip { // skip MQTT init if MQTT_SKIP=true
+		if mqtts {
+			mqttClient = mqtt.ECSNewMQTTClientWithTLS(cfg, logger)
+		} else {
+			mqttClient = mqtt.NewMQTTClient(cfg.MqttHost, logger)
+		}
+		logger.Println("MQTT client initialized")
 	} else {
-		mqttClient = mqtt.NewMQTTClient(cfg.MqttHost, logger)
+		logger.Println("⚠️ MQTT initialization skipped (MQTT_SKIP=true)")
 	}
 
 	// Parse fx
@@ -49,7 +58,7 @@ func NewApplication(cfg config.AppConfig, cfgPlc config.PlcConfig, logger *log.L
 		logger.Printf("Error parsing fx, fallback to: %v", fx)
 	}
 
-	// Parse devices
+	// Parse devices for main PLC
 	devices := make([]PLC_Utils.Device, 0)
 	sources := []string{cfg.Devices2, cfg.Devices16, cfg.Devices32, cfg.DevicesAscii}
 	for _, source := range sources {
@@ -60,28 +69,74 @@ func NewApplication(cfg config.AppConfig, cfgPlc config.PlcConfig, logger *log.L
 		devices = append(devices, parsed...)
 	}
 
-	// Init PLC connection
-	if err := PLC.InitMSPClient(cfgPlc.DestPlcHost, cfgPlc.DestPlcPort); err != nil {
-		return nil, fmt.Errorf("init PLC failed: %w", err)
+	// ✅ Parse devices for destination PLC (only if skip=true)
+	destDevices := make([]PLC_Utils.Device, 0)
+	if cfg.MqttSkip {
+		destSources := []string{
+			cfgPlc.DestDevices2,
+			cfgPlc.DestDevices16,
+			cfgPlc.DestDevices32,
+			cfgPlc.DestDevicesAscii,
+		}
+		for _, source := range destSources {
+			if source == "" {
+				continue
+			}
+			parsed, err := PLC_Utils.ParseDeviceAddresses(source, logger)
+			if err != nil {
+				logger.Printf("Error parsing destination PLC device list: %v", err)
+				continue
+			}
+			destDevices = append(destDevices, parsed...)
+		}
 	}
-	logger.Printf("Start collecting data from %s", cfgPlc.DestPlcHost)
+
+
+	// Init PLC connection
+	if err := PLC.InitMSPClient(cfg.PlcHost, cfg.PlcPort); err != nil {
+		return nil, fmt.Errorf("init main PLC failed: %w", err)
+	}
+	logger.Printf("Start communicating with main PLC at %s", cfg.PlcHost)
+
+	// If skip=true, read both PLCs (no MQTT)
+	if cfg.MqttSkip {
+		logger.Println("⚠️ MQTT skipped — will read from Source and Destination PLCs")
+
+		// initialize destination PLC as second source
+		if err := PLC.InitMSPClient(cfgPlc.DestPlcHost, cfgPlc.DestPlcPort); err != nil {
+			return nil, fmt.Errorf("init destination PLC failed: %w", err)
+		}
+		logger.Printf("Also communicating with destination PLC at %s", cfgPlc.DestPlcHost)
+	} else {
+		// normal operation
+		if err := PLC.InitMSPClient(cfgPlc.DestPlcHost, cfgPlc.DestPlcPort); err != nil {
+			return nil, fmt.Errorf("init destination PLC failed: %w", err)
+		}
+		logger.Printf("Start collecting data from %s", cfgPlc.DestPlcHost)
+	}
+
 
 	return &Application{
-		cfgPLc:     cfgPLC,
+		cfgPlc:     cfgPlc,
+		cfg:        cfg,
 		logger:     logger,
 		mqttClient: mqttClient,
 		devices:    devices,
+		destDevices: destDevices, 
 		fx:         fx,
 	}, nil
+
 }
 
 // Run starts the profiler, worker pool, and data collection loop
 func (a *Application) Run(ctx context.Context) error {
-	defer a.mqttClient.Disconnect(250)
+	if a.mqttClient != nil {  // only disconnect if initialized
+		defer a.mqttClient.Disconnect(250)
+	}
 
 	go profiler.Start(a.cfg.Profilling, a.logger)
 
-	a.workerPool = worker.NewPool(15, a.cfg, a.logger, a.mqttClient)
+	a.workerPool = worker.NewPool(15, a.cfg, a.logger, a.mqttClient, a)
 	a.workerPool.Start()
 	defer a.workerPool.Stop()
 
@@ -98,6 +153,7 @@ func (a *Application) Run(ctx context.Context) error {
 
 
 func (a *Application) readAndEnqueue(ctx context.Context) {
+	// --- Existing PLC polling loop (Main PLC) ---
 	for _, device := range a.devices {
 		// per-device timeout
 		devCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -111,7 +167,6 @@ func (a *Application) readAndEnqueue(ctx context.Context) {
 				continue
 				// uncomment this when running in docker container (comment continue)
 				// os.Exit(1)
-
 			}
 			if errors.Is(err, context.Canceled) {
 				a.logger.Printf("Read from %s canceled", device.DeviceType+device.DeviceNumber)
@@ -124,14 +179,45 @@ func (a *Application) readAndEnqueue(ctx context.Context) {
 		msg := map[string]any{
 			"address": device.DeviceType + device.DeviceNumber,
 			"value":   val,
+			"source":  a.cfg.PlcHost, 
 		}
 		a.workerPool.Enqueue(msg)
 	}
+
+	// --- Additional PLC polling (Dest PLC) when MQTT_SKIP=true ---
+	if a.cfg.MqttSkip {
+		for _, device := range a.destDevices {
+			devCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			
+
+		val, err := readDataWithContext(devCtx, device, a.fx)
+			cancel()
+
+			if err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					a.logger.Printf("[Dest PLC] Timeout reading %s, skipping", device.DeviceType+device.DeviceNumber)
+					continue
+				}
+				if errors.Is(err, context.Canceled) {
+					a.logger.Printf("[Dest PLC] Read from %s canceled", device.DeviceType+device.DeviceNumber)
+					continue
+				}
+				a.logger.Printf("[Dest PLC] Failed to read from %s: %v", device.DeviceType+device.DeviceNumber, err)
+				continue
+			}
+
+			msg := map[string]any{
+				"address": device.DeviceType + device.DeviceNumber,
+				"value":   val,
+				"source":  a.cfgPlc.DestPlcHost,
+			}
+			a.workerPool.Enqueue(msg)
+		}
+	}
+
 }
 
-
-
-func readDataWithContext(ctx context.Context, device utils.Device, fx bool) (value any, err error) {
+func readDataWithContext(ctx context.Context, device PLC_Utils.Device, fx bool) (value any, err error){
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -146,8 +232,6 @@ func readDataWithContext(ctx context.Context, device utils.Device, fx bool) (val
 }
 
 // PLC Write Operations
-
-
 // Close cleanly disconnects PLC client
 func (a *Application) Close() error {
 	if a.client == nil {

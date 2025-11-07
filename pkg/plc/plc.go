@@ -163,12 +163,17 @@ func BatchWrite(deviceType string, startDevice string, writeData []byte, maxRegi
 		chunk := writeData[startIndex:endIndex]
 
 		// Write from currentAddr backward
-		logger.Printf("Writing to %s device number %d, chunk size %d, data % X\n", deviceType, currentAddr-uint16(written), chunkSize, chunk)
+		//logger.Printf("Writing to %s device number %d, chunk size %d, data % X\n", deviceType, currentAddr-uint16(written), chunkSize, chunk)
 
 		_, err = msp.client.Write(deviceType, int64(currentAddr-uint16(written)), int64(chunkSize), chunk)
 		if err != nil {
+			logger.Printf("❌ Failed to write %d registers to device %s at address %d: %v", chunkSize, deviceType, currentAddr-uint16(written), err)
 			return err
 		}
+
+		// Log successful write
+		logger.Printf("✅ Wrote %d registers to address %s%d: data=%X", chunkSize, deviceType, currentAddr-uint16(written), chunk)
+
 
 		written += chunkSize
 	}

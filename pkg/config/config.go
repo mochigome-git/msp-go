@@ -37,6 +37,11 @@ type PlcConfig struct {
 	DestPlcDevice       string
 	DestPlcData         string
 	DestPlcDeviceUpsert string
+	DestDevices2        string
+	DestDevices16       string
+	DestDevices32       string
+	DestDevicesAscii    string
+	WriteMapSrctoDest   string
 }
 
 
@@ -82,6 +87,11 @@ func Load(files ...string) {
 		DestPlcDevice:       os.Getenv("DEST_PLC_DEVICE"),
 		DestPlcData:         os.Getenv("DEST_PLC_DATA"),
 		DestPlcDeviceUpsert: os.Getenv("DEST_PLC_DEVICE_UPSERT"),
+		DestDevices2:     os.Getenv("DEST_DEVICES_2bit"),
+		DestDevices16:    os.Getenv("DEST_DEVICES_16bit"),
+		DestDevices32:    os.Getenv("DEST_DEVICES_32bit"),
+		DestDevicesAscii: os.Getenv("DEST_DEVICES_ASCII"),
+		WriteMapSrctoDest: os.Getenv("WRITE_MAP_SRC_TO_DEST_16bit"),
 	}
 
 }

@@ -31,7 +31,7 @@ top, list, png
 func main() {
 	config.Load(".env.local")
 	cfg := config.Cfg
-	cfgPlc := config.CfgPlc
+	cfgPlc := config.Plc
 
 	logger := log.New(os.Stdout, "", log.LstdFlags)
 
