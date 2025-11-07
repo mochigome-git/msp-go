@@ -3,7 +3,7 @@ version: "3.8"
 services:
   msp:
     container_name: msp-go
-    image: mochigome/msp-go:2.15v.ecs
+    image: mochigome/msp-go:2.22v.arm
     restart: always
     stop_grace_period: 30s
     logging:

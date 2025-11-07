@@ -8,26 +8,31 @@ import (
 	"strconv"
 	"time"
 
+	MQTT "github.com/eclipse/paho.mqtt.golang"
 	"github.com/mochigome-git/msp-go/internal/app/profiler"
 	"github.com/mochigome-git/msp-go/internal/app/worker"
 	"github.com/mochigome-git/msp-go/pkg/config"
 	"github.com/mochigome-git/msp-go/pkg/mqtt"
 	"github.com/mochigome-git/msp-go/pkg/plc"
-	"github.com/mochigome-git/msp-go/pkg/utils"
-
-	MQTT "github.com/eclipse/paho.mqtt.golang"
+	PLC "github.com/mochigome-git/msp-go/pkg/plc"
+	MCP "github.com/mochigome-git/msp-go/pkg/mcp"
+	PLC_Utils "github.com/mochigome-git/msp-go/pkg/utils"
 )
 
+// Application is the main app handling both reading (MQTT → PLC) and writing (PLC → MQTT)
 type Application struct {
 	cfg        config.AppConfig
+	cfgPlc     config.PlcConfig
 	logger     *log.Logger
 	mqttClient MQTT.Client
-	devices    []utils.Device
+	devices    []PLC_Utils.Device
 	workerPool *worker.Pool
 	fx         bool
+	client     MCP.Client
 }
 
-func NewApplication(cfg config.AppConfig, logger *log.Logger) (*Application, error) {
+// NewApplication initializes MQTT, PLC, devices, and returns the app instance
+func NewApplication(cfg config.AppConfig, cfgPlc config.PlcConfig, logger *log.Logger) (*Application, error) {
 	mqtts, _ := strconv.ParseBool(cfg.MqttsStr)
 
 	var mqttClient MQTT.Client
@@ -45,24 +50,24 @@ func NewApplication(cfg config.AppConfig, logger *log.Logger) (*Application, err
 	}
 
 	// Parse devices
-	devices := make([]utils.Device, 0)
+	devices := make([]PLC_Utils.Device, 0)
 	sources := []string{cfg.Devices2, cfg.Devices16, cfg.Devices32, cfg.DevicesAscii}
 	for _, source := range sources {
-		parsed, err := utils.ParseDeviceAddresses(source, logger)
+		parsed, err := PLC_Utils.ParseDeviceAddresses(source, logger)
 		if err != nil {
 			logger.Printf("Error parsing device list: %v", err)
 		}
 		devices = append(devices, parsed...)
 	}
 
-	// Init PLC
-	if err := plc.InitMSPClient(cfg.PlcHost, cfg.PlcPort); err != nil {
+	// Init PLC connection
+	if err := PLC.InitMSPClient(cfgPlc.DestPlcHost, cfgPlc.DestPlcPort); err != nil {
 		return nil, fmt.Errorf("init PLC failed: %w", err)
 	}
-	logger.Printf("Start collecting data from %s", cfg.PlcHost)
+	logger.Printf("Start collecting data from %s", cfgPlc.DestPlcHost)
 
 	return &Application{
-		cfg:        cfg,
+		cfgPLc:     cfgPLC,
 		logger:     logger,
 		mqttClient: mqttClient,
 		devices:    devices,
@@ -70,6 +75,7 @@ func NewApplication(cfg config.AppConfig, logger *log.Logger) (*Application, err
 	}, nil
 }
 
+// Run starts the profiler, worker pool, and data collection loop
 func (a *Application) Run(ctx context.Context) error {
 	defer a.mqttClient.Disconnect(250)
 
@@ -89,6 +95,7 @@ func (a *Application) Run(ctx context.Context) error {
 		}
 	}
 }
+
 
 func (a *Application) readAndEnqueue(ctx context.Context) {
 	for _, device := range a.devices {
@@ -122,6 +129,8 @@ func (a *Application) readAndEnqueue(ctx context.Context) {
 	}
 }
 
+
+
 func readDataWithContext(ctx context.Context, device utils.Device, fx bool) (value any, err error) {
 	select {
 	case <-ctx.Done():
@@ -133,5 +142,93 @@ func readDataWithContext(ctx context.Context, device utils.Device, fx bool) (val
 			return nil, err
 		}
 		return value, nil
+	}
+}
+
+// PLC Write Operations
+
+
+// Close cleanly disconnects PLC client
+func (a *Application) Close() error {
+	if a.client == nil {
+		return nil
+	}
+	if err := a.client.Close(); err != nil {
+		return fmt.Errorf("failed to close PLC connection: %w", err)
+	}
+	a.logger.Println("PLC connection closed")
+	return nil
+}
+
+// writeDataWithContext writes bytes to PLC with context timeout
+func (a *Application) writeDataWithContext(ctx context.Context, device PLC_Utils.Device, data []byte) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return plc.BatchWrite(device.DeviceType, device.DeviceNumber, data, device.NumberRegisters, a.logger)
+	}
+}
+
+// WritePLC writes data to PLC (single or batch)
+func (a *Application) WritePLC(ctx context.Context, deviceStr string, value any) error {
+	parts := strings.Split(deviceStr, ",")
+	if len(parts) != 4 {
+		return fmt.Errorf("invalid device string format, expected 'Type,Number,ProcessNumber,Registers'")
+	}
+
+	deviceType := parts[0]
+	deviceNumber := parts[1]
+
+	processNumber, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return fmt.Errorf("invalid processNumber: %w", err)
+	}
+
+	numberRegisters, err := strconv.Atoi(parts[3])
+	if err != nil {
+		return fmt.Errorf("invalid numberRegisters: %w", err)
+	}
+
+	writeOne := func(valStr string) error {
+		data, err := plc.EncodeData(valStr, processNumber)
+		if err != nil {
+			return err
+		}
+
+		device := PLC_Utils.Device{
+			DeviceType:      deviceType,
+			DeviceNumber:    deviceNumber,
+			NumberRegisters: uint16(numberRegisters),
+		}
+
+		a.logger.Printf("Writing to %s%s: % X", deviceType, deviceNumber, data)
+
+		if err := a.writeDataWithContext(ctx, device, data); err != nil {
+			return fmt.Errorf("failed to write PLC data: %w", err)
+		}
+		return nil
+	}
+
+	switch v := value.(type) {
+	case string:
+		return writeOne(v)
+	case []string:
+		for _, val := range v {
+			if err := writeOne(val); err != nil {
+				return err
+			}
+		}
+		return nil
+	case bool:
+		return writeOne(fmt.Sprintf("%t", v))
+	case int, int8, int16, int32, int64:
+		return writeOne(fmt.Sprintf("%d", v))
+	case uint, uint8, uint16, uint32, uint64:
+		return writeOne(fmt.Sprintf("%d", v))
+	case float32, float64:
+		return writeOne(fmt.Sprintf("%f", v))
+	default:
+		return fmt.Errorf("unsupported value type: %T", value)
 	}
 }

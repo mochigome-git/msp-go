@@ -42,3 +42,4 @@ func ParseDeviceAddresses(envVar string, logger *log.Logger) ([]Device, error) {
 	logger.Printf("Loaded %d device(s) from DEVICES environment variable", len(devices))
 	return devices, nil
 }
+

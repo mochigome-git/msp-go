@@ -4,7 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
-
+	"strings"
 	"github.com/joho/godotenv"
 )
 
@@ -23,12 +23,25 @@ type AppConfig struct {
 	MqttHost      string // mqtthost stores the MQTT broker's hostname
 	MqttTopic     string // topic stores the topic of the MQTT broker
 	MqttsStr      string // Turn on for TLS connection
+	MqttSkip      bool //Skip Mqtt use direct mode
 	ECScaCert     string // ESC verion direct read from params store
 	ECSclientCert string // ESC verion direct read from params store
 	ECSclientKey  string // ESC verion direct read from params store
 }
 
+
+type PlcConfig struct {
+	DestPlcHost         string // plcHost stores the PLC's hostname
+	DestPlcPort         int    // plcPort stores the PLC's port number
+	DestFxStr           string // Mitsubishi PLC FX series true =1 false =0
+	DestPlcDevice       string
+	DestPlcData         string
+	DestPlcDeviceUpsert string
+}
+
+
 var Cfg AppConfig
+var Plc PlcConfig
 
 // Load initializes all configuration variables from environment variables
 func Load(files ...string) {
@@ -58,6 +71,17 @@ func Load(files ...string) {
 		ECScaCert:     os.Getenv("ECS_MQTT_CA_CERTIFICATE"),
 		ECSclientCert: os.Getenv("ECS_MQTT_CLIENT_CERTIFICATE"),
 		ECSclientKey:  os.Getenv("ECS_MQTT_PRIVATE_KEY"),
+		MqttSkip: strings.ToLower(os.Getenv("MQTT_SKIP")) == "true",
+
+	}
+
+	Plc = PlcConfig{
+		DestPlcHost:         os.Getenv("DEST_PLC_HOST"),
+		DestPlcPort:         GetEnvAsInt("DEST_PLC_PORT", 5011),
+		DestFxStr:           os.Getenv("DES_PLC_MODEL"),
+		DestPlcDevice:       os.Getenv("DEST_PLC_DEVICE"),
+		DestPlcData:         os.Getenv("DEST_PLC_DATA"),
+		DestPlcDeviceUpsert: os.Getenv("DEST_PLC_DEVICE_UPSERT"),
 	}
 
 }
