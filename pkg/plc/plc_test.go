@@ -57,7 +57,7 @@ func TestWriteData_ASCIIRegisters(t *testing.T) {
 
 // Test helper to inject a mock client
 func SetMspClientMock(client mcp.Client) {
-	msp = &mspClient{client: client}
+	msp = &MSPClient{client: client}
 }
 
 func TestBatchWrite(t *testing.T) {

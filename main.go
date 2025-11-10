@@ -31,7 +31,6 @@ top, list, png
 func main() {
 	config.Load(".env.local")
 	cfg := config.Cfg
-	cfgPlc := config.Plc
 
 	logger := log.New(os.Stdout, "", log.LstdFlags)
 
@@ -40,7 +39,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	application, err := app.NewApplication(cfg, cfgPlc, logger)
+	application, err := app.NewApplication(cfg, logger)
 	if err != nil {
 		logger.Fatalf("Error initializing application: %v", err)
 	}

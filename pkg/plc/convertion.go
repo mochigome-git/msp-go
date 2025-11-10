@@ -174,16 +174,6 @@ func EncodeData(valueStr string, ProcessNumber int) ([]byte, error) {
 		data[1] = byte((ival >> 8) & 0xFF)
 		return data, nil
 
-	case 7: // 16-bit unsigned int (ADD THIS CASE)
-		val, err := strconv.ParseUint(valueStr, 10, 16)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse uint16: %w", err)
-		}
-		data := make([]byte, 2)
-		data[0] = byte(val & 0xFF)
-		data[1] = byte((val >> 8) & 0xFF)
-		return data, nil
-
 	default:
 		return nil, fmt.Errorf("unsupported number of registers: %d", ProcessNumber)
 	}

@@ -5,7 +5,7 @@ import (
 	"crypto/x509"
 	"log"
 
-	"github.com/mochigome-git/msp-go/internal/app/monitor"
+	"github.com/mochigome-git/msp-go/internal/monitor"
 	"github.com/mochigome-git/msp-go/pkg/config"
 
 	MQTT "github.com/eclipse/paho.mqtt.golang"

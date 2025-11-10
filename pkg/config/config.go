@@ -5,48 +5,41 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
 	"github.com/joho/godotenv"
 )
 
 type AppConfig struct {
-	// PLC configure
-	Profilling   int    // pprof server port
-	PlcHost      string // plcHost stores the PLC's hostname
-	PlcPort      int    // plcPort stores the PLC's port number
-	FxStr        string // Mitsubishi PLC FX series true =1 false =0
-	Devices16    string // store 16bit device for SLMP(Seamless Message Protocol) query
-	Devices32    string // store 32bit device for SLMP(Seamless Message Protocol) query
-	Devices2     string // store 2bit device for SLMP(Seamless Message Protocol) query
-	DevicesAscii string // convert Ascii to text
-
-	// MQTT Broker configure
+	// App-level
+	Profilling    int    // pprof server port
 	MqttHost      string // mqtthost stores the MQTT broker's hostname
 	MqttTopic     string // topic stores the topic of the MQTT broker
 	MqttsStr      string // Turn on for TLS connection
-	MqttSkip      bool //Skip Mqtt use direct mode
+	MqttSkip      bool   //Skip Mqtt use direct mode
 	ECScaCert     string // ESC verion direct read from params store
 	ECSclientCert string // ESC verion direct read from params store
 	ECSclientKey  string // ESC verion direct read from params store
+
+	// PLC-level
+	PLCs []PLCConfig
 }
 
-
-type PlcConfig struct {
-	DestPlcHost         string // plcHost stores the PLC's hostname
-	DestPlcPort         int    // plcPort stores the PLC's port number
-	DestFxStr           string // Mitsubishi PLC FX series true =1 false =0
-	DestPlcDevice       string
-	DestPlcData         string
-	DestPlcDeviceUpsert string
-	DestDevices2        string
-	DestDevices16       string
-	DestDevices32       string
-	DestDevicesAscii    string
-	WriteMapSrctoDest   string
+type PLCConfig struct {
+	Name         string // "main", "secondary", "backup"
+	Host         string // plcHost stores the PLC's hostname
+	Port         int    // plcPort stores the PLC's port number
+	FxModel      string // Mitsubishi PLC FX series true =1 false =0
+	Devices2     string // store 2bit device for SLMP(Seamless Message Protocol) query
+	Devices16    string // store 16bit device for SLMP(Seamless Message Protocol) query
+	Devices32    string // store 32bit device for SLMP(Seamless Message Protocol) query
+	DevicesAscii string // convert Ascii to text
+	DeviceUpsert string
+	Data         string
+	WriteMap     string
 }
-
 
 var Cfg AppConfig
-var Plc PlcConfig
+var Plc PLCConfig
 
 // Load initializes all configuration variables from environment variables
 func Load(files ...string) {
@@ -60,40 +53,41 @@ func Load(files ...string) {
 		}
 	}
 
-	Cfg = AppConfig{
+	mainPLC := PLCConfig{
+		Name:         "main",
+		Host:         os.Getenv("PLC_HOST"),
+		Port:         GetEnvAsInt("PLC_PORT", 5011),
+		FxModel:      os.Getenv("PLC_MODEL"),
+		Devices2:     os.Getenv("DEVICES_2bit"),
+		Devices16:    os.Getenv("DEVICES_16bit"),
+		Devices32:    os.Getenv("DEVICES_32bit"),
+		DevicesAscii: os.Getenv("DEVICES_ASCII"),
+		WriteMap:     os.Getenv("WRITE_MAP_SEC_TO_PRIM_16bit"),
+	}
 
+	secondaryPLC := PLCConfig{
+		Name:         "secondary",
+		Host:         os.Getenv("SEC_PLC_HOST"),
+		Port:         GetEnvAsInt("SEC_PLC_PORT", 5011),
+		FxModel:      os.Getenv("SEC_PLC_MODEL"),
+		Devices2:     os.Getenv("SEC_DEVICES_2bit"),
+		Devices16:    os.Getenv("SEC_DEVICES_16bit"),
+		Devices32:    os.Getenv("SEC_DEVICES_32bit"),
+		DevicesAscii: os.Getenv("SEC_DEVICES_ASCII"),
+		WriteMap:     os.Getenv("WRITE_MAP_PRIM_TO_SEC_16bit"),
+	}
+
+	Cfg = AppConfig{
 		Profilling:    GetEnvAsInt("PPROFT_PORT", 6060),
-		PlcHost:       os.Getenv("PLC_HOST"),
-		PlcPort:       GetEnvAsInt("PLC_PORT", 5011),
-		FxStr:         os.Getenv("PLC_MODEL"),
-		Devices16:     os.Getenv("DEVICES_16bit"),
-		Devices32:     os.Getenv("DEVICES_32bit"),
-		Devices2:      os.Getenv("DEVICES_2bit"),
-		MqttTopic:     os.Getenv("MQTT_TOPIC"),
-		DevicesAscii:  os.Getenv("DEVICES_ASCII"),
 		MqttHost:      os.Getenv("MQTT_HOST"),
+		MqttTopic:     os.Getenv("MQTT_TOPIC"),
 		MqttsStr:      os.Getenv("MQTTS_ON"),
+		MqttSkip:      strings.ToLower(os.Getenv("MQTT_SKIP")) == "true",
 		ECScaCert:     os.Getenv("ECS_MQTT_CA_CERTIFICATE"),
 		ECSclientCert: os.Getenv("ECS_MQTT_CLIENT_CERTIFICATE"),
 		ECSclientKey:  os.Getenv("ECS_MQTT_PRIVATE_KEY"),
-		MqttSkip: strings.ToLower(os.Getenv("MQTT_SKIP")) == "true",
-
+		PLCs:          []PLCConfig{mainPLC, secondaryPLC},
 	}
-
-	Plc = PlcConfig{
-		DestPlcHost:         os.Getenv("DEST_PLC_HOST"),
-		DestPlcPort:         GetEnvAsInt("DEST_PLC_PORT", 5011),
-		DestFxStr:           os.Getenv("DES_PLC_MODEL"),
-		DestPlcDevice:       os.Getenv("DEST_PLC_DEVICE"),
-		DestPlcData:         os.Getenv("DEST_PLC_DATA"),
-		DestPlcDeviceUpsert: os.Getenv("DEST_PLC_DEVICE_UPSERT"),
-		DestDevices2:     os.Getenv("DEST_DEVICES_2bit"),
-		DestDevices16:    os.Getenv("DEST_DEVICES_16bit"),
-		DestDevices32:    os.Getenv("DEST_DEVICES_32bit"),
-		DestDevicesAscii: os.Getenv("DEST_DEVICES_ASCII"),
-		WriteMapSrctoDest: os.Getenv("WRITE_MAP_SRC_TO_DEST_16bit"),
-	}
-
 }
 
 // GetEnvAsInt gets the value of an environment variable as a uint16

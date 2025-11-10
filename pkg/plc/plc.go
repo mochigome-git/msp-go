@@ -10,11 +10,11 @@ import (
 	"github.com/mochigome-git/msp-go/pkg/mcp"
 )
 
-type mspClient struct {
+type MSPClient struct {
 	client mcp.Client
 }
 
-var msp *mspClient
+var msp *MSPClient
 
 // InitMSPClient initializes the MSP client for the specified PLC host and port.
 func InitMSPClient(plcHost string, plcPort int) error {
@@ -26,36 +26,40 @@ func InitMSPClient(plcHost string, plcPort int) error {
 	if err != nil {
 		return err
 	}
-	msp = &mspClient{client: client}
+	msp = &MSPClient{client: client}
 	return nil
 }
 
+func NewMSPClient(plcHost string, plcPort int) (*MSPClient, error) {
+	client, err := mcp.New3EClient(plcHost, plcPort, mcp.NewLocalStation())
+	if err != nil {
+		return nil, err
+	}
+	return &MSPClient{client: client}, nil
+}
+
 // ReadData reads data from the PLC for the specified device.
-func ReadData(ctx context.Context, deviceType string, deviceNumber string, numberRegisters uint16, fx bool) (any, error) {
-	if msp == nil {
+func (m *MSPClient) ReadData(ctx context.Context, deviceType string, deviceNumber string, numberRegisters uint16, fx bool) (any, error) {
+	if m == nil || m.client == nil {
 		return nil, fmt.Errorf("MSP client not initialized")
+	}
+
+	deviceNumberInt64, err := strconv.ParseInt(deviceNumber, 10, 64)
+	if err != nil || deviceType == "Y" {
+		deviceNumberInt64, err = strconv.ParseInt(deviceNumber, 16, 64)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Create a channel to receive the result or context cancellation
 	resultCh := make(chan any)
 	errCh := make(chan error)
 
-	deviceNumberInt64, err := strconv.ParseInt(deviceNumber, 10, 64)
-	if err != nil || deviceType == "Y" {
-
-		// Convert the offset string to an integer
-		deviceNumberInt64, err = strconv.ParseInt(deviceNumber, 16, 64)
-		if err != nil {
-			return nil, err
-		}
-
-		//return nil, err
-	}
-
 	// Start a goroutine to perform the data reading
 	go func() {
 		// Read data from the PLC
-		data, err := msp.client.Read(deviceType, deviceNumberInt64, int64(numberRegisters), fx)
+		data, err := m.client.Read(deviceType, deviceNumberInt64, int64(numberRegisters), fx)
 		if err != nil {
 			errCh <- err
 			return
@@ -90,8 +94,8 @@ func ReadData(ctx context.Context, deviceType string, deviceNumber string, numbe
 // deviceNumber: starting device address (string, can be decimal or hex depending on device).
 // numberRegisters: number of points to write.
 // writeData: the data to be written as a byte slice.
-func WriteData(deviceType string, deviceNumber string, writeData []byte, numberRegisters uint16) error {
-	if msp == nil {
+func (m *MSPClient) WriteData(deviceType, deviceNumber string, writeData []byte, numberRegisters uint16) error {
+	if m == nil || m.client == nil {
 		return fmt.Errorf("MSP client not initialized")
 	}
 
@@ -111,7 +115,7 @@ func WriteData(deviceType string, deviceNumber string, writeData []byte, numberR
 	}
 
 	// Write to consecutive registers
-	_, err = msp.client.Write(deviceType, deviceNumberInt64, int64(numberRegisters), writeData)
+	_, err = m.client.Write(deviceType, deviceNumberInt64, int64(numberRegisters), writeData)
 	return err
 }
 
@@ -121,7 +125,7 @@ func WriteData(deviceType string, deviceNumber string, writeData []byte, numberR
 // numberRegisters: number of points to write.
 // writeData: the data to be written as a byte slice.
 // BatchWrite get wrap-around (overflow) and jump to lower device (reverse)
-func BatchWrite(deviceType string, startDevice string, writeData []byte, maxRegistersPerWrite uint16, logger *log.Logger) error {
+func (m *MSPClient) BatchWrite(deviceType, startDevice string, writeData []byte, maxRegistersPerWrite uint16, logger *log.Logger) error {
 	var deviceNumberUint16 uint16
 	var err error
 
@@ -163,17 +167,12 @@ func BatchWrite(deviceType string, startDevice string, writeData []byte, maxRegi
 		chunk := writeData[startIndex:endIndex]
 
 		// Write from currentAddr backward
-		//logger.Printf("Writing to %s device number %d, chunk size %d, data % X\n", deviceType, currentAddr-uint16(written), chunkSize, chunk)
+		logger.Printf("Writing to %s device number %d, chunk size %d, data % X\n", deviceType, currentAddr-uint16(written), chunkSize, chunk)
 
 		_, err = msp.client.Write(deviceType, int64(currentAddr-uint16(written)), int64(chunkSize), chunk)
 		if err != nil {
-			logger.Printf("❌ Failed to write %d registers to device %s at address %d: %v", chunkSize, deviceType, currentAddr-uint16(written), err)
 			return err
 		}
-
-		// Log successful write
-		logger.Printf("✅ Wrote %d registers to address %s%d: data=%X", chunkSize, deviceType, currentAddr-uint16(written), chunk)
-
 
 		written += chunkSize
 	}
