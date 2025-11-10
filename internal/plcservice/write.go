@@ -17,6 +17,17 @@ type WriteTarget struct {
 	Device  PLC_Utils.Device
 }
 
+type SimpleCondWrite struct {
+	Bit      string // e.g. "M64"
+	Operator string // "==" or "!="
+	Src      string // target source to write if condition matches
+}
+
+type WriteMapWithCond struct {
+	Default map[string]WriteTarget
+	Cond    []SimpleCondWrite
+}
+
 // WriteDevice writes a value to a single device on a specific PLC with type safety
 func (s *Service) WriteDevice(ctx context.Context, plcName string, device PLC_Utils.Device, value any) error {
 	s.mu.Lock()
@@ -69,13 +80,15 @@ func (s *Service) WriteDevice(ctx context.Context, plcName string, device PLC_Ut
 }
 
 // BuildWriteMap parses config to map source → WriteTarget
-func BuildWriteMap(cfg config.AppConfig) map[string]WriteTarget {
-	result := make(map[string]WriteTarget)
+func BuildWriteMap(cfg config.AppConfig) WriteMapWithCond {
+	defaultMap := make(map[string]WriteTarget)
+	var condRules []SimpleCondWrite
 
 	for _, plcCfg := range cfg.PLCs {
 		mapStr := plcCfg.WriteMap
 		start := 0
 
+		// Build default mapping
 		for i := 0; i <= len(mapStr); i++ {
 			if i == len(mapStr) || mapStr[i] == ';' {
 				pair := strings.TrimSpace(mapStr[start:i])
@@ -84,7 +97,6 @@ func BuildWriteMap(cfg config.AppConfig) map[string]WriteTarget {
 					continue
 				}
 
-				// Split source > destination
 				src, dest, ok := strings.Cut(pair, ">")
 				if !ok {
 					continue
@@ -92,10 +104,8 @@ func BuildWriteMap(cfg config.AppConfig) map[string]WriteTarget {
 				src = strings.TrimSpace(src)
 				dest = strings.TrimSpace(dest)
 
-				// Destination format: D3302,1,1,1  -> DeviceType, DeviceNumber, ProcessNumber, NumberRegisters
 				destParts := strings.Split(dest, ",")
 				if len(destParts) < 4 {
-					// fallback to 1 register and process 1
 					destParts = append(destParts, "1", "1")
 				}
 
@@ -119,29 +129,108 @@ func BuildWriteMap(cfg config.AppConfig) map[string]WriteTarget {
 					ProcessNumber:   uint16(processNumber),
 				}
 
-				result[src] = WriteTarget{
+				defaultMap[src] = WriteTarget{
 					PLCName: plcCfg.Name,
 					Device:  device,
 				}
 			}
 		}
+
+		// Parse conditional rules
+		condRules = append(condRules, ParseCondRules(plcCfg.CondMap)...)
 	}
 
-	return result
+	return WriteMapWithCond{
+		Default: defaultMap,
+		Cond:    condRules,
+	}
 }
 
 // DirectWrite writes a message according to the write map
-func (s *Service) DirectWrite(ctx context.Context, msg map[string]any, writeMap map[string]WriteTarget) error {
-	addr, ok := msg["address"].(string)
-	if !ok {
+// DirectWrite writes a message according to the write map with conditional logic
+func (s *Service) DirectWrite(ctx context.Context, msg map[string]any, writeMap WriteMapWithCond) error {
+	// Extract device address and value from message
+	addrVal, exists := msg["address"]
+	if !exists {
 		return fmt.Errorf("missing address in message")
 	}
-
-	target, ok := writeMap[addr]
+	addr, ok := addrVal.(string)
 	if !ok {
-		return nil //fmt.Errorf("address %s not in write map", addr)
+		return fmt.Errorf("address must be a string")
 	}
 
-	// Use the PLCName from WriteTarget
-	return s.WriteDevice(ctx, target.PLCName, target.Device, msg["value"])
+	value, exists := msg["value"]
+	if !exists {
+		return fmt.Errorf("missing value in message")
+	}
+
+	written := make(map[string]bool)
+	conditionalDevices := make(map[string]bool)
+
+	// Build set of conditional devices
+	for _, rule := range writeMap.Cond {
+		conditionalDevices[rule.Src] = true
+		conditionalDevices[rule.Bit] = true
+	}
+	// Store the current value for future conditional checks
+	if conditionalDevices[addr] {
+		s.StoreDeviceValue(addr, value)
+	}
+	//	s.PrintStoredDeviceValues()
+
+	// 1. Apply conditional rules
+	for _, rule := range writeMap.Cond {
+		// Get the current value of the BIT device from storage
+		bitVal, exists := s.GetDeviceValue(rule.Bit)
+		if !exists {
+			//s.logger.Printf("Warning: bit device value not found for %s", rule.Bit)
+			continue
+		}
+
+		bitInt, ok := toInt(bitVal)
+		if !ok {
+			s.logger.Printf("Warning: cannot convert value to int for bit device %s: %v", rule.Bit, bitVal)
+			continue
+		}
+
+		// Evaluate condition based on the BIT device value
+		match := false
+		switch rule.Operator {
+		case "==":
+			match = bitInt == 1
+		case "!=":
+			match = bitInt != 1
+		}
+
+		if match {
+			// If condition matches, write the SRC device to its target
+			if target, ok := writeMap.Default[rule.Src]; ok {
+				// Get the current value of the SRC device to write
+				srcVal, exists := s.GetDeviceValue(rule.Src)
+				if !exists {
+					//	s.logger.Printf("Warning: source value not found for %s", rule.Src)
+					continue
+				}
+
+				//	s.logger.Printf("Conditional write: %s value: %v (triggered by %s=%v)", rule.Src, srcVal, rule.Bit, bitVal)
+				if err := s.WriteDevice(ctx, target.PLCName, target.Device, srcVal); err != nil {
+					return err
+				}
+				written[rule.Src] = true
+
+				// Clear the stored value after successful write
+				s.ClearDeviceValue(rule.Src)
+			}
+		}
+	}
+
+	// 2. Apply default write for non-conditional devices
+	if !conditionalDevices[addr] && !written[addr] {
+		if target, ok := writeMap.Default[addr]; ok {
+			//s.logger.Printf("Default write: %s value: %v", addr, value)
+			return s.WriteDevice(ctx, target.PLCName, target.Device, value)
+		}
+	}
+
+	return nil
 }

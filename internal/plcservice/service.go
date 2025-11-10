@@ -1,72 +1,32 @@
 package plcservice
 
 import (
-	"context"
 	"log"
 	"strconv"
 	"strings"
 	"sync"
 
-	"github.com/mochigome-git/msp-go/pkg/plc"
 	PLC_Utils "github.com/mochigome-git/msp-go/pkg/utils"
 )
 
-// plcWrapper wraps the global plc package for a specific PLC host/port
-type plcWrapper struct {
-	host   string
-	port   int
-	mu     sync.Mutex
-	client *plc.MSPClient
-}
-
-func (p *plcWrapper) initClient() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.client != nil {
-		return nil
-	}
-
-	client, err := plc.NewMSPClient(p.host, p.port)
-	if err != nil {
-		return err
-	}
-	p.client = client
-	return nil
-}
-
-func (p *plcWrapper) Read(ctx context.Context, device PLC_Utils.Device, fx bool) (any, error) {
-	if err := p.initClient(); err != nil {
-		return nil, err
-	}
-	return p.client.ReadData(ctx, device.DeviceType, device.DeviceNumber, device.NumberRegisters, fx)
-}
-
-func (p *plcWrapper) Write(device PLC_Utils.Device, data []byte) error {
-	if err := p.initClient(); err != nil {
-		return err
-	}
-	if device.NumberRegisters == 1 {
-		return p.client.WriteData(device.DeviceType, device.DeviceNumber, data, device.NumberRegisters)
-	}
-	return p.client.BatchWrite(device.DeviceType, device.DeviceNumber, data, device.NumberRegisters, log.Default())
-}
-
 // Service manages multiple PLC clients and devices
 type Service struct {
-	clients map[string]*plcWrapper        // PLC name -> plcWrapper
-	devices map[string][]PLC_Utils.Device // PLC name -> devices
-	logger  *log.Logger
-	fx      bool
-	mu      sync.Mutex
+	clients      map[string]*plcWrapper        // PLC name -> plcWrapper
+	devices      map[string][]PLC_Utils.Device // PLC name -> devices
+	deviceValues map[string]any                // Store current values of all devices (address -> value)
+	logger       *log.Logger
+	fx           bool
+	mu           sync.Mutex
+	valuesMutex  sync.RWMutex // Separate mutex for device values
 }
 
 // NewService creates a new PLC service
 func NewService(logger *log.Logger) *Service {
 	return &Service{
-		clients: make(map[string]*plcWrapper),
-		devices: make(map[string][]PLC_Utils.Device),
-		logger:  logger,
+		clients:      make(map[string]*plcWrapper),
+		devices:      make(map[string][]PLC_Utils.Device),
+		deviceValues: make(map[string]any),
+		logger:       logger,
 	}
 }
 
@@ -111,6 +71,38 @@ func (s *Service) InitPLC(name, host string, port int, deviceStrs []string, fx b
 	s.fx = fx
 	s.logger.Printf("PLC %s initialized at %s:%d with %d devices", name, host, port, len(s.devices[name]))
 	return nil
+}
+
+// StoreDeviceValue stores the current value of a device
+func (s *Service) StoreDeviceValue(address string, value any) {
+	s.valuesMutex.Lock()
+	defer s.valuesMutex.Unlock()
+	s.deviceValues[address] = value
+	//s.logger.Printf("Stored device value: %s = %v", address, value)
+}
+
+// GetDeviceValue retrieves the current value of a device
+func (s *Service) GetDeviceValue(address string) (any, bool) {
+	s.valuesMutex.RLock()
+	defer s.valuesMutex.RUnlock()
+	value, exists := s.deviceValues[address]
+	return value, exists
+}
+
+// ClearDeviceValue removes a device value from storage
+func (s *Service) ClearDeviceValue(address string) {
+	s.valuesMutex.Lock()
+	defer s.valuesMutex.Unlock()
+	delete(s.deviceValues, address)
+	// s.logger.Printf("Cleared device value: %s", address)
+}
+
+// ClearAllDeviceValues clears all stored device values
+func (s *Service) ClearAllDeviceValues() {
+	s.valuesMutex.Lock()
+	defer s.valuesMutex.Unlock()
+	s.deviceValues = make(map[string]any)
+	// s.logger.Printf("Cleared all device values")
 }
 
 // Close disconnects all PLC clients (optional)

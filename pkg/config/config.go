@@ -36,6 +36,7 @@ type PLCConfig struct {
 	DeviceUpsert string
 	Data         string
 	WriteMap     string
+	CondMap      string // store conditional rules, e.g., "M64==D71,M30!=D80"
 }
 
 var Cfg AppConfig
@@ -62,7 +63,8 @@ func Load(files ...string) {
 		Devices16:    os.Getenv("DEVICES_16bit"),
 		Devices32:    os.Getenv("DEVICES_32bit"),
 		DevicesAscii: os.Getenv("DEVICES_ASCII"),
-		WriteMap:     os.Getenv("WRITE_MAP_SEC_TO_PRIM_16bit"),
+		WriteMap:     os.Getenv("WRITE_MAP_SEC_TO_PRIM"),
+		CondMap:      os.Getenv("WRITE_MAP_SEC_TO_PRIM_CONDITION"),
 	}
 
 	secondaryPLC := PLCConfig{
@@ -74,7 +76,8 @@ func Load(files ...string) {
 		Devices16:    os.Getenv("SEC_DEVICES_16bit"),
 		Devices32:    os.Getenv("SEC_DEVICES_32bit"),
 		DevicesAscii: os.Getenv("SEC_DEVICES_ASCII"),
-		WriteMap:     os.Getenv("WRITE_MAP_PRIM_TO_SEC_16bit"),
+		WriteMap:     os.Getenv("WRITE_MAP_PRIM_TO_SEC"),
+		CondMap:      os.Getenv("WRITE_MAP_PRIM_TO_SEC_CONDITION"),
 	}
 
 	Cfg = AppConfig{
