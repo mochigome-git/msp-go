@@ -11,7 +11,7 @@ import (
 )
 
 // ParseData parses the data based on the specified number of registers and fx condition
-func ParseData(data []byte, numberRegisters int, fx bool) (any, error) {
+func parseData(data []byte, numberRegisters int, fx bool) (any, error) {
 	registerBinary, _ := mcp.NewParser().Do(data)
 	if fx {
 		registerBinary, _ = mcp.NewParser().DoFx(data)

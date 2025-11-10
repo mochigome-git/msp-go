@@ -66,7 +66,7 @@ func (m *MSPClient) ReadData(ctx context.Context, deviceType string, deviceNumbe
 		}
 
 		// Parse the data based on the number of registers and fx condition
-		value, err := ParseData(data, int(numberRegisters), fx)
+		value, err := parseData(data, int(numberRegisters), fx)
 		if err != nil {
 			errCh <- err
 			return
@@ -126,6 +126,10 @@ func (m *MSPClient) WriteData(deviceType, deviceNumber string, writeData []byte,
 // writeData: the data to be written as a byte slice.
 // BatchWrite get wrap-around (overflow) and jump to lower device (reverse)
 func (m *MSPClient) BatchWrite(deviceType, startDevice string, writeData []byte, maxRegistersPerWrite uint16, logger *log.Logger) error {
+	if m == nil || m.client == nil {
+		return fmt.Errorf("MSP client not initialized")
+	}
+
 	var deviceNumberUint16 uint16
 	var err error
 
@@ -157,7 +161,6 @@ func (m *MSPClient) BatchWrite(deviceType, startDevice string, writeData []byte,
 			chunkSize = int(maxRegistersPerWrite)
 		}
 
-		// Calculate chunk indices (still forward in data, but written backward to device)
 		startIndex := written * 2
 		endIndex := startIndex + chunkSize*2
 		if endIndex > len(writeData) {
@@ -166,10 +169,12 @@ func (m *MSPClient) BatchWrite(deviceType, startDevice string, writeData []byte,
 
 		chunk := writeData[startIndex:endIndex]
 
-		// Write from currentAddr backward
-		logger.Printf("Writing to %s device number %d, chunk size %d, data % X\n", deviceType, currentAddr-uint16(written), chunkSize, chunk)
+		if logger != nil {
+			logger.Printf("Writing to %s device number %d, chunk size %d, data % X\n", deviceType, currentAddr-uint16(written), chunkSize, chunk)
+		}
 
-		_, err = msp.client.Write(deviceType, int64(currentAddr-uint16(written)), int64(chunkSize), chunk)
+		// Use the instance's client, not global msp
+		_, err = m.client.Write(deviceType, int64(currentAddr-uint16(written)), int64(chunkSize), chunk)
 		if err != nil {
 			return err
 		}
