@@ -1,22 +1,40 @@
 # Stage 1: Build the Go program
-FROM golang:1.24-alpine AS build
-WORKDIR /opt/msp-go
+FROM golang:1.25.3-alpine AS builder
 
-# Copy the project files and build the program
-COPY . .
-RUN apk --no-cache add gcc musl-dev
-RUN cd root && \
-    CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o mainroot main.go
+# Accept platform args from buildx
+ARG TARGETOS
+ARG TARGETARCH
 
-# Stage 2: Copy the built Go program into a minimal container
-FROM alpine:3.21
-RUN apk --no-cache add ca-certificates
+# Configure Go environment for static build
+ENV CGO_ENABLED=0 \
+    GOOS=$TARGETOS \
+    GOARCH=$TARGETARCH
+
 WORKDIR /app
-COPY --from=build /opt/msp-go/root/mainroot /app/
 
-RUN chmod +x /app/mainroot
+# Cache dependencies first
+COPY go.mod go.sum ./
+RUN go mod download
 
-CMD ["/app/mainroot"]
+# Copy source code
+COPY . .
+
+# Build the binary (adjust the main package path if needed)
+RUN go build -o main ./cmd/
+
+# --- Stage 2: Runtime ---
+FROM gcr.io/distroless/base-debian11
+
+# Copy built binary
+COPY --from=builder /app/main /app/main
+
+# Working directory and port
+WORKDIR /app
+EXPOSE 8080
+
+# Run the app
+ENTRYPOINT ["/app/main"]
+
 
 # Build Image with command
 # docker buildx create --use
