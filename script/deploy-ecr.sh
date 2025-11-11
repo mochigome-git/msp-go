@@ -29,8 +29,8 @@ REPO_NAME=${ECR_REPO_NAME}
 # Derived tags
 IMAGE_TAG="${AWS_ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${REPO_NAME}:v${VERSION}"
 IMAGE_TAG_LATEST="${AWS_ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${REPO_NAME}:latest"
-DOCKER_IMAGE_VERSION="${DOCKER_TAG}:${TAG_VERSION}"
-DOCKER_IMAGE_LATEST="${DOCKER_TAG}:${TAG_LATEST}"
+DOCKER_IMAGE_VERSION="${DOCKER_TAG}:v${VERSION}"
+DOCKER_IMAGE_LATEST="${DOCKER_TAG}:latest"
 
 
 
@@ -57,7 +57,7 @@ aws ecr get-login-password --region "${REGION}" | docker login \
 
 # --- Authenticate Docker ---
 echo "🔐 Logging into Docker Hub..."
-docker login -u "${DOCKERHUB_USERNAME}" -p "${DOCKERHUB_PASSWORD}"
+docker login 
 
 # --- Build multi-arch image ---
 echo "🏗️  Building multi-arch image..."
