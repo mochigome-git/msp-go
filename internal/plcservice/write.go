@@ -227,8 +227,15 @@ func (s *Service) DirectWrite(ctx context.Context, msg map[string]any, writeMap 
 	// 2. Apply default write for non-conditional devices
 	if !conditionalDevices[addr] && !written[addr] {
 		if target, ok := writeMap.Default[addr]; ok {
-			//s.logger.Printf("Default write: %s value: %v", addr, value)
-			return s.WriteDevice(ctx, target.PLCName, target.Device, value)
+			intVal, ok := toInt(value)
+			if !ok {
+				// cannot convert, skip write
+				return nil
+			}
+			if intVal != 0 {
+				//s.logger.Printf("Default write: %s value: %v", addr, value)
+				return s.WriteDevice(ctx, target.PLCName, target.Device, value)
+			}
 		}
 	}
 
