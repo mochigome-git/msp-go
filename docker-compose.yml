@@ -3,9 +3,11 @@ version: "3.8"
 services:
   msp:
     container_name: msp-go
-    image: mochigome/msp-go:2.22v.arm
+    image: mochigome/msp-go:2.22.5
     restart: always
     stop_grace_period: 30s
+    env_file:
+      - .env.local
     logging:
       driver: "json-file"
       options:
