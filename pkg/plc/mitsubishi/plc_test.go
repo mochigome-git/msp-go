@@ -1,4 +1,4 @@
-package plc
+package mitsubishi
 
 import (
 	"log"

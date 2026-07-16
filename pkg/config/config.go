@@ -28,7 +28,7 @@ type PLCConfig struct {
 	Name         string // "main", "secondary", "backup"
 	Host         string // plcHost stores the PLC's hostname
 	Port         int    // plcPort stores the PLC's port number
-	FxModel      string // Mitsubishi PLC FX series true =1 false =0
+	FxModel      bool   // Mitsubishi PLC FX series true =1 false =0
 	Devices2     string // store 2bit device for SLMP(Seamless Message Protocol) query
 	Devices16    string // store 16bit device for SLMP(Seamless Message Protocol) query
 	Devices32    string // store 32bit device for SLMP(Seamless Message Protocol) query
@@ -37,6 +37,7 @@ type PLCConfig struct {
 	Data         string
 	WriteMap     string
 	CondMap      string // store conditional rules, e.g., "M64==D71,M30!=D80"
+	Brand        string // "shibaura",
 }
 
 var Cfg AppConfig
@@ -58,26 +59,28 @@ func Load(files ...string) {
 		Name:         "main",
 		Host:         os.Getenv("PLC_HOST"),
 		Port:         GetEnvAsInt("PLC_PORT", 5011),
-		FxModel:      os.Getenv("PLC_MODEL"),
+		FxModel:      GetEnvAsBool("PLC_MODEL", false),
 		Devices2:     os.Getenv("DEVICES_2bit"),
 		Devices16:    os.Getenv("DEVICES_16bit"),
 		Devices32:    os.Getenv("DEVICES_32bit"),
 		DevicesAscii: os.Getenv("DEVICES_ASCII"),
 		WriteMap:     os.Getenv("WRITE_MAP_SEC_TO_PRIM"),
 		CondMap:      os.Getenv("WRITE_MAP_SEC_TO_PRIM_CONDITION"),
+		Brand:        strings.ToLower(strings.TrimSpace(os.Getenv("MAIN_PLC_BRAND"))),
 	}
 
 	secondaryPLC := PLCConfig{
 		Name:         "secondary",
 		Host:         os.Getenv("SEC_PLC_HOST"),
 		Port:         GetEnvAsInt("SEC_PLC_PORT", 5011),
-		FxModel:      os.Getenv("SEC_PLC_MODEL"),
+		FxModel:      GetEnvAsBool("PLC_MODEL", false),
 		Devices2:     os.Getenv("SEC_DEVICES_2bit"),
 		Devices16:    os.Getenv("SEC_DEVICES_16bit"),
 		Devices32:    os.Getenv("SEC_DEVICES_32bit"),
 		DevicesAscii: os.Getenv("SEC_DEVICES_ASCII"),
 		WriteMap:     os.Getenv("WRITE_MAP_PRIM_TO_SEC"),
 		CondMap:      os.Getenv("WRITE_MAP_PRIM_TO_SEC_CONDITION"),
+		Brand:        strings.ToLower(strings.TrimSpace(os.Getenv("SUB_PLC_BRAND"))),
 	}
 
 	Cfg = AppConfig{
@@ -101,4 +104,17 @@ func GetEnvAsInt(name string, defaultValue int) int {
 		}
 	}
 	return defaultValue
+}
+
+func GetEnvAsBool(name string, defaultValue bool) bool {
+	val, exists := os.LookupEnv(name)
+	if !exists {
+		return defaultValue
+	}
+
+	b, err := strconv.ParseBool(val)
+	if err != nil {
+		return defaultValue
+	}
+	return b
 }

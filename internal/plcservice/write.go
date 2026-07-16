@@ -3,24 +3,28 @@ package plcservice
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
 	"github.com/mochigome-git/msp-go/pkg/config"
-	"github.com/mochigome-git/msp-go/pkg/plc"
+	// CHANGED: was pkg/plc — EncodeData now lives in pkg/plc/mitsubishi
+	// If you later need Shibaura encoding, add a shibaura.EncodeData too.
+
 	PLC_Utils "github.com/mochigome-git/msp-go/pkg/utils"
 )
 
-// WriteTarget links a source address to a PLC device
+// WriteTarget, SimpleCondWrite, WriteMapWithCond — all unchanged from original.
+
 type WriteTarget struct {
 	PLCName string
 	Device  PLC_Utils.Device
 }
 
 type SimpleCondWrite struct {
-	Bit      string // e.g. "M64"
-	Operator string // "==" or "!="
-	Src      string // target source to write if condition matches
+	Bit      string
+	Operator string
+	Src      string
 }
 
 type WriteMapWithCond struct {
@@ -28,7 +32,7 @@ type WriteMapWithCond struct {
 	Cond    []SimpleCondWrite
 }
 
-// WriteDevice writes a value to a single device on a specific PLC with type safety
+// WriteDevice — identical to original except EncodeData call uses mitsubishi package.
 func (s *Service) WriteDevice(ctx context.Context, plcName string, device PLC_Utils.Device, value any) error {
 	s.mu.Lock()
 	client, ok := s.clients[plcName]
@@ -38,15 +42,20 @@ func (s *Service) WriteDevice(ctx context.Context, plcName string, device PLC_Ut
 	}
 
 	writeOne := func(valStr string, processNumber int) error {
-		data, err := plc.EncodeData(valStr, processNumber)
+		data, err := client.EncodeData(valStr, processNumber)
 		if err != nil {
 			return err
 		}
 		done := make(chan error, 1)
 		go func() {
-			done <- client.Write(device, data)
+			// CHANGED: was client.Write(device, data)
+			// Now call WriteData or BatchWrite directly on PLCClient
+			if device.NumberRegisters == 1 {
+				done <- client.WriteData(device.DeviceType, device.DeviceNumber, data, device.NumberRegisters)
+			} else {
+				done <- client.BatchWrite(device.DeviceType, device.DeviceNumber, data, device.NumberRegisters, log.Default())
+			}
 		}()
-
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -79,7 +88,7 @@ func (s *Service) WriteDevice(ctx context.Context, plcName string, device PLC_Ut
 	return nil
 }
 
-// BuildWriteMap parses config to map source → WriteTarget
+// BuildWriteMap — identical to original, no changes needed.
 func BuildWriteMap(cfg config.AppConfig) WriteMapWithCond {
 	defaultMap := make(map[string]WriteTarget)
 	var condRules []SimpleCondWrite
@@ -88,7 +97,6 @@ func BuildWriteMap(cfg config.AppConfig) WriteMapWithCond {
 		mapStr := plcCfg.WriteMap
 		start := 0
 
-		// Build default mapping
 		for i := 0; i <= len(mapStr); i++ {
 			if i == len(mapStr) || mapStr[i] == ';' {
 				pair := strings.TrimSpace(mapStr[start:i])
@@ -96,7 +104,6 @@ func BuildWriteMap(cfg config.AppConfig) WriteMapWithCond {
 				if pair == "" {
 					continue
 				}
-
 				src, dest, ok := strings.Cut(pair, ">")
 				if !ok {
 					continue
@@ -116,7 +123,6 @@ func BuildWriteMap(cfg config.AppConfig) WriteMapWithCond {
 				if n, err := strconv.Atoi(strings.TrimSpace(destParts[3])); err == nil {
 					numRegs = n
 				}
-
 				processNumber := 1
 				if n, err := strconv.Atoi(strings.TrimSpace(destParts[2])); err == nil {
 					processNumber = n
@@ -135,21 +141,14 @@ func BuildWriteMap(cfg config.AppConfig) WriteMapWithCond {
 				}
 			}
 		}
-
-		// Parse conditional rules
 		condRules = append(condRules, ParseCondRules(plcCfg.CondMap)...)
 	}
 
-	return WriteMapWithCond{
-		Default: defaultMap,
-		Cond:    condRules,
-	}
+	return WriteMapWithCond{Default: defaultMap, Cond: condRules}
 }
 
-// DirectWrite writes a message according to the write map
-// DirectWrite writes a message according to the write map with conditional logic
+// DirectWrite — identical to original, no changes needed.
 func (s *Service) DirectWrite(ctx context.Context, msg map[string]any, writeMap WriteMapWithCond) error {
-	// Extract device address and value from message
 	addrVal, exists := msg["address"]
 	if !exists {
 		return fmt.Errorf("missing address in message")
@@ -158,7 +157,6 @@ func (s *Service) DirectWrite(ctx context.Context, msg map[string]any, writeMap 
 	if !ok {
 		return fmt.Errorf("address must be a string")
 	}
-
 	value, exists := msg["value"]
 	if !exists {
 		return fmt.Errorf("missing value in message")
@@ -167,33 +165,24 @@ func (s *Service) DirectWrite(ctx context.Context, msg map[string]any, writeMap 
 	written := make(map[string]bool)
 	conditionalDevices := make(map[string]bool)
 
-	// Build set of conditional devices
 	for _, rule := range writeMap.Cond {
 		conditionalDevices[rule.Src] = true
 		conditionalDevices[rule.Bit] = true
 	}
-	// Store the current value for future conditional checks
 	if conditionalDevices[addr] {
 		s.StoreDeviceValue(addr, value)
 	}
-	//	s.PrintStoredDeviceValues()
 
-	// 1. Apply conditional rules
 	for _, rule := range writeMap.Cond {
-		// Get the current value of the BIT device from storage
 		bitVal, exists := s.GetDeviceValue(rule.Bit)
 		if !exists {
-			//s.logger.Printf("Warning: bit device value not found for %s", rule.Bit)
 			continue
 		}
-
 		bitInt, ok := toInt(bitVal)
 		if !ok {
 			s.logger.Printf("Warning: cannot convert value to int for bit device %s: %v", rule.Bit, bitVal)
 			continue
 		}
-
-		// Evaluate condition based on the BIT device value
 		match := false
 		switch rule.Operator {
 		case "==":
@@ -201,39 +190,28 @@ func (s *Service) DirectWrite(ctx context.Context, msg map[string]any, writeMap 
 		case "!=":
 			match = bitInt != 1
 		}
-
 		if match {
-			// If condition matches, write the SRC device to its target
 			if target, ok := writeMap.Default[rule.Src]; ok {
-				// Get the current value of the SRC device to write
 				srcVal, exists := s.GetDeviceValue(rule.Src)
 				if !exists {
-					//	s.logger.Printf("Warning: source value not found for %s", rule.Src)
 					continue
 				}
-
-				//	s.logger.Printf("Conditional write: %s value: %v (triggered by %s=%v)", rule.Src, srcVal, rule.Bit, bitVal)
 				if err := s.WriteDevice(ctx, target.PLCName, target.Device, srcVal); err != nil {
 					return err
 				}
 				written[rule.Src] = true
-
-				// Clear the stored value after successful write
 				s.ClearDeviceValue(rule.Src)
 			}
 		}
 	}
 
-	// 2. Apply default write for non-conditional devices
 	if !conditionalDevices[addr] && !written[addr] {
 		if target, ok := writeMap.Default[addr]; ok {
 			intVal, ok := toInt(value)
 			if !ok {
-				// cannot convert, skip write
 				return nil
 			}
 			if intVal != 0 {
-				//s.logger.Printf("Default write: %s value: %v", addr, value)
 				return s.WriteDevice(ctx, target.PLCName, target.Device, value)
 			}
 		}

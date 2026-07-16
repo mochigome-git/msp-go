@@ -1,4 +1,4 @@
-package plc
+package mitsubishi
 
 import (
 	"encoding/hex"
@@ -10,7 +10,8 @@ import (
 	"github.com/mochigome-git/msp-go/pkg/mcp"
 )
 
-// ParseData parses the data based on the specified number of registers and fx condition
+// parseData parses raw PLC bytes based on the register count / data type convention.
+// This is your original parseData function, unchanged.
 func parseData(data []byte, numberRegisters int, fx bool) (any, error) {
 	registerBinary, _ := mcp.NewParser().Do(data)
 	if fx {
@@ -25,13 +26,13 @@ func parseData(data []byte, numberRegisters int, fx bool) (any, error) {
 			val |= uint16(b) << (8 * i)
 		}
 		return val, nil
-	case 2: // 32-bit device (handles negative floats)
+
+	case 2: // 32-bit float
 		var val uint32
 		for i, b := range data {
 			val |= uint32(b) << (8 * i)
 		}
 		floatValue := math.Float32frombits(val)
-		// Format to 6 decimal places and take first 6 significant digits
 		floatString := fmt.Sprintf("%.6f", floatValue)
 		var builder strings.Builder
 		digitsCount := 0
@@ -64,7 +65,7 @@ func parseData(data []byte, numberRegisters int, fx bool) (any, error) {
 		}
 		return string(hexBytes), nil
 
-	case 5: // 16-bit signed (handles negative values)
+	case 5: // 16-bit signed
 		var val int16
 		for i, b := range data {
 			val |= int16(b) << (8 * i)
@@ -82,12 +83,10 @@ func parseData(data []byte, numberRegisters int, fx bool) (any, error) {
 		if len(data) < 4 {
 			return nil, fmt.Errorf("not enough data for int32: got %d bytes", len(data))
 		}
-
 		var val int32
 		for i, b := range data[:4] {
 			val |= int32(b) << (8 * i)
 		}
-
 		return val, nil
 
 	default:
@@ -95,14 +94,14 @@ func parseData(data []byte, numberRegisters int, fx bool) (any, error) {
 	}
 }
 
-// EncodeData encodes a value string into a byte slice for PLC writing,
-// based on the expected number of registers and data type.
+// EncodeData encodes a value string into bytes for PLC writing.
+// Moved here from the old pkg/plc package — callers import from mitsubishi now.
+// plcservice/write.go: change import to pkg/plc/mitsubishi and call mitsubishi.EncodeData
 func EncodeData(valueStr string, ProcessNumber int) ([]byte, error) {
 	valueStr = strings.TrimSpace(valueStr)
 
 	switch ProcessNumber {
-	case 1: // 16-bit unsigned or signed int (we use uint16 here)
-		// Parse as int
+	case 1: // 16-bit unsigned
 		val, err := strconv.ParseUint(valueStr, 10, 16)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse uint16: %w", err)
@@ -112,7 +111,7 @@ func EncodeData(valueStr string, ProcessNumber int) ([]byte, error) {
 		data[1] = byte((val >> 8) & 0xFF)
 		return data, nil
 
-	case 2: // 32-bit float (like ParseData case 2)
+	case 2: // 32-bit float
 		fval, err := strconv.ParseFloat(valueStr, 32)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse float32: %w", err)
@@ -124,8 +123,7 @@ func EncodeData(valueStr string, ProcessNumber int) ([]byte, error) {
 		}
 		return data, nil
 
-	case 3: // 2-bit device (single bit)
-		// Accept "true"/"false" or "1"/"0"
+	case 3: // single bit
 		val := byte(0x00)
 		switch strings.ToLower(valueStr) {
 		case "true", "1", "on":
@@ -137,22 +135,17 @@ func EncodeData(valueStr string, ProcessNumber int) ([]byte, error) {
 		}
 		return []byte{val}, nil
 
-	case 4: // ASCII device
+	case 4: // ASCII
 		asciiBytes := []byte(valueStr)
-
-		// Calculate needed bytes (2 bytes per register)
-		neededBytes := ((len(asciiBytes) + 1) / 2) * 2 // round up to even length
-
-		// Pad if shorter
+		neededBytes := ((len(asciiBytes) + 1) / 2) * 2
 		if len(asciiBytes) < neededBytes {
 			padded := make([]byte, neededBytes)
 			copy(padded, asciiBytes)
 			asciiBytes = padded
 		}
-
 		return asciiBytes, nil
 
-	case 5: // 16-bit signed int
+	case 5: // 16-bit signed
 		val, err := strconv.ParseInt(valueStr, 10, 16)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse int16: %w", err)
@@ -162,8 +155,7 @@ func EncodeData(valueStr string, ProcessNumber int) ([]byte, error) {
 		data[1] = byte((val >> 8) & 0xFF)
 		return data, nil
 
-	case 6: // 2-bit device for fx (special case, treat as uint16 divided by 10)
-		// Assume the value is an integer or float representing the device value * 10
+	case 6: // fx device * 10
 		fval, err := strconv.ParseFloat(valueStr, 64)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse float for fx device: %w", err)

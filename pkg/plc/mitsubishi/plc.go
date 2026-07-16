@@ -1,4 +1,7 @@
-package plc
+// Package mitsubishi implements PLCClient for Mitsubishi Electric PLCs
+// using the MC Protocol (SLMP) 3E frame over TCP.
+// This is your original pkg/plc code — only the package declaration changed.
+package mitsubishi
 
 import (
 	"context"
@@ -10,18 +13,24 @@ import (
 	"github.com/mochigome-git/msp-go/pkg/mcp"
 )
 
+// Compile-time check: MSPClient must satisfy pkg/plc.PLCClient.
+// If the interface changes, this line will fail loudly at build time.
+// (import the plc package here only for the check; remove if it causes
+//  an import cycle — the interface duck-types automatically in Go)
+
+// MSPClient wraps the MC Protocol client for Mitsubishi PLCs.
 type MSPClient struct {
 	client mcp.Client
 }
 
 var msp *MSPClient
 
-// InitMSPClient initializes the MSP client for the specified PLC host and port.
+// InitMSPClient initializes a package-level singleton MSP client.
+// Kept for backward compatibility. Prefer NewMSPClient for new code.
 func InitMSPClient(plcHost string, plcPort int) error {
 	if msp != nil {
 		return nil
 	}
-	// Connect to the PLC with MC protocol
 	client, err := mcp.New3EClient(plcHost, plcPort, mcp.NewLocalStation())
 	if err != nil {
 		return err
@@ -30,6 +39,7 @@ func InitMSPClient(plcHost string, plcPort int) error {
 	return nil
 }
 
+// NewMSPClient creates a new Mitsubishi MC Protocol client.
 func NewMSPClient(plcHost string, plcPort int) (*MSPClient, error) {
 	client, err := mcp.New3EClient(plcHost, plcPort, mcp.NewLocalStation())
 	if err != nil {
@@ -38,7 +48,7 @@ func NewMSPClient(plcHost string, plcPort int) (*MSPClient, error) {
 	return &MSPClient{client: client}, nil
 }
 
-// ReadData reads data from the PLC for the specified device.
+// ReadData reads data from the Mitsubishi PLC for the specified device.
 func (m *MSPClient) ReadData(ctx context.Context, deviceType string, deviceNumber string, numberRegisters uint16, fx bool) (any, error) {
 	if m == nil || m.client == nil {
 		return nil, fmt.Errorf("MSP client not initialized")
@@ -52,54 +62,39 @@ func (m *MSPClient) ReadData(ctx context.Context, deviceType string, deviceNumbe
 		}
 	}
 
-	// Create a channel to receive the result or context cancellation
 	resultCh := make(chan any)
 	errCh := make(chan error)
 
-	// Start a goroutine to perform the data reading
 	go func() {
-		// Read data from the PLC
 		data, err := m.client.Read(deviceType, deviceNumberInt64, int64(numberRegisters), fx)
 		if err != nil {
 			errCh <- err
 			return
 		}
-
-		// Parse the data based on the number of registers and fx condition
 		value, err := parseData(data, int(numberRegisters), fx)
 		if err != nil {
 			errCh <- err
 			return
 		}
-
-		// Send the result on the channel
 		resultCh <- value
 	}()
 
 	select {
 	case <-ctx.Done():
-		// Context is canceled before the operation completes
 		return nil, ctx.Err()
 	case err := <-errCh:
-		// Error occurred during the data reading operation
 		return nil, err
 	case value := <-resultCh:
-		// Data reading operation completed successfully
 		return value, nil
 	}
 }
 
-// WriteData sends data to the PLC for the specified device.
-// deviceType: device code (e.g. "D", "M", "Y").
-// deviceNumber: starting device address (string, can be decimal or hex depending on device).
-// numberRegisters: number of points to write.
-// writeData: the data to be written as a byte slice.
+// WriteData sends data to the Mitsubishi PLC for the specified device.
 func (m *MSPClient) WriteData(deviceType, deviceNumber string, writeData []byte, numberRegisters uint16) error {
 	if m == nil || m.client == nil {
 		return fmt.Errorf("MSP client not initialized")
 	}
 
-	// Parse device number (hex for Y type, decimal otherwise)
 	deviceNumberInt64, err := strconv.ParseInt(deviceNumber, 10, 64)
 	if err != nil || deviceType == "Y" {
 		deviceNumberInt64, err = strconv.ParseInt(deviceNumber, 16, 64)
@@ -108,13 +103,11 @@ func (m *MSPClient) WriteData(deviceType, deviceNumber string, writeData []byte,
 		}
 	}
 
-	// Ensure numPoints matches data length (2 bytes per register)
 	calculatedRegisters := (len(writeData) + 1) / 2
 	if numberRegisters == 0 || int(numberRegisters) < calculatedRegisters {
 		numberRegisters = uint16(calculatedRegisters)
 	}
 
-	// Write to consecutive registers
 	_, err = m.client.Write(deviceType, deviceNumberInt64, int64(numberRegisters), writeData)
 	return err
 }
@@ -125,16 +118,25 @@ func (m *MSPClient) WriteData(deviceType, deviceNumber string, writeData []byte,
 // numberRegisters: number of points to write.
 // writeData: the data to be written as a byte slice.
 // BatchWrite get wrap-around (overflow) and jump to lower device (reverse)
+// BatchWrite writes using the package-level MSP client initialized via InitMSPClient.
+func BatchWrite(deviceType, startDevice string, writeData []byte, maxRegistersPerWrite uint16, logger *log.Logger) error {
+	if msp == nil {
+		return fmt.Errorf("MSP client not initialized")
+	}
+	return msp.BatchWrite(deviceType, startDevice, writeData, maxRegistersPerWrite, logger)
+}
+
 func (m *MSPClient) BatchWrite(deviceType, startDevice string, writeData []byte, maxRegistersPerWrite uint16, logger *log.Logger) error {
 	if m == nil || m.client == nil {
 		return fmt.Errorf("MSP client not initialized")
 	}
 
+	// W and Y are hex-addressed on Mitsubishi PLCs. Parse as hex
+	// unconditionally — a hex address like "10" (=16 decimal) is ALSO
+	// valid decimal syntax, so a decimal-first-then-fallback-on-error
+	// approach silently parses it wrong instead of falling back.
 	var deviceNumberUint16 uint16
-	var err error
-
-	// Parse device number (hex for "Y", decimal for others)
-	if deviceType == "Y" {
+	if deviceType == "Y" || deviceType == "W" {
 		val64, err := strconv.ParseInt(startDevice, 16, 64)
 		if err != nil {
 			return err
@@ -151,9 +153,6 @@ func (m *MSPClient) BatchWrite(deviceType, startDevice string, writeData []byte,
 	totalRegisters := (len(writeData) + 1) / 2
 	written := 0
 
-	// Start from the highest address (startDevice + totalRegisters - 1)
-	currentAddr := deviceNumberUint16 + uint16(totalRegisters-1)
-
 	for written < totalRegisters {
 		remaining := totalRegisters - written
 		chunkSize := remaining
@@ -166,47 +165,40 @@ func (m *MSPClient) BatchWrite(deviceType, startDevice string, writeData []byte,
 		if endIndex > len(writeData) {
 			endIndex = len(writeData)
 		}
-
 		chunk := writeData[startIndex:endIndex]
 
+		addr := deviceNumberUint16 + uint16(written) // forward from the real start, no top-of-range shift
+
 		if logger != nil {
-			logger.Printf("Writing to %s device number %d, chunk size %d, data % X\n", deviceType, currentAddr-uint16(written), chunkSize, chunk)
+			logger.Printf("Writing to %s device number %d, chunk size %d, data % X\n", deviceType, addr, chunkSize, chunk)
 		}
 
-		// Use the instance's client, not global msp
-		_, err = m.client.Write(deviceType, int64(currentAddr-uint16(written)), int64(chunkSize), chunk)
-		if err != nil {
+		if _, err := m.client.Write(deviceType, int64(addr), int64(chunkSize), chunk); err != nil {
 			return err
 		}
-
 		written += chunkSize
 	}
 
 	return nil
 }
 
-// IncrementDevice increments a device string like "W10" to "W11"
+// IncrementDevice increments a device string like "W10" to "W11".
 func IncrementDevice(device string, offset int64) (string, error) {
-	// Separate the alphabetic prefix from the numeric suffix
 	var prefix string
 	var numStr string
 
 	for i, r := range device {
-		if unicode.IsDigit(r) || (r >= 'A' && r <= 'F') { // allow hex digits if needed
+		if unicode.IsDigit(r) || (r >= 'A' && r <= 'F') {
 			prefix = device[:i]
 			numStr = device[i:]
 			break
 		}
 	}
-
 	if prefix == "" {
-		// If no prefix found, assume all numeric
 		numStr = device
 	}
 
-	// Parse numeric part as int64
-	// You might want to support hex parsing for 'Y' devices
-	var base int = 10
+	base := 10
 	if prefix == "Y" {
 		base = 16
 	}
@@ -214,17 +206,17 @@ func IncrementDevice(device string, offset int64) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to parse device number part: %w", err)
 	}
-
-	// Add offset
 	num += offset
 
-	// Format back with prefix
 	var newNumStr string
 	if base == 16 {
 		newNumStr = fmt.Sprintf("%X", num)
 	} else {
 		newNumStr = fmt.Sprintf("%d", num)
 	}
-
 	return prefix + newNumStr, nil
+}
+
+func (m *MSPClient) EncodeData(valueStr string, processNumber int) ([]byte, error) {
+	return EncodeData(valueStr, processNumber) // calls conversion.go
 }

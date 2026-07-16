@@ -40,12 +40,16 @@ func NewApplication(cfg config.AppConfig, logger *log.Logger) (*Application, err
 		logger.Println("⚠️ MQTT initialization skipped (MQTT_SKIP=true)")
 	}
 
-	fx := len(cfg.PLCs) > 0 && cfg.PLCs[0].FxModel == "fx"
-
 	plcSvc := plcservice.NewService(logger)
 	for _, plcCfg := range cfg.PLCs {
-		devices := []string{plcCfg.Devices2, plcCfg.Devices16, plcCfg.Devices32, plcCfg.DevicesAscii}
-		if err := plcSvc.InitPLC(plcCfg.Name, plcCfg.Host, plcCfg.Port, devices, fx); err != nil {
+		devices := []string{
+			plcCfg.Devices2,
+			plcCfg.Devices16,
+			plcCfg.Devices32,
+			plcCfg.DevicesAscii,
+		}
+
+		if err := plcSvc.InitPLC(plcCfg, devices); err != nil {
 			return nil, err
 		}
 	}
@@ -55,7 +59,6 @@ func NewApplication(cfg config.AppConfig, logger *log.Logger) (*Application, err
 		logger:     logger,
 		mqttClient: mqttClient,
 		plcSvc:     plcSvc,
-		fx:         fx,
 	}, nil
 }
 

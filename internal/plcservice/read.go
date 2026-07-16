@@ -44,9 +44,12 @@ func (s *Service) ReadAndEnqueue(ctx context.Context, wp WorkerPool) {
 func (s *Service) ReadDevice(ctx context.Context, plcName string, device PLC_Utils.Device) (any, error) {
 	s.mu.Lock()
 	client, ok := s.clients[plcName]
+	fx := s.fx[plcName] // ← look up by PLC name
 	s.mu.Unlock()
+
 	if !ok {
 		return nil, fmt.Errorf("PLC client %s not found", plcName)
 	}
-	return client.Read(ctx, device, s.fx)
+
+	return client.ReadData(ctx, device.DeviceType, device.DeviceNumber, device.NumberRegisters, fx)
 }
