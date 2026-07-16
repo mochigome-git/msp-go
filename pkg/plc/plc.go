@@ -138,26 +138,27 @@ func (m *MSPClient) BatchWrite(deviceType, startDevice string, writeData []byte,
 		return fmt.Errorf("MSP client not initialized")
 	}
 
+	// W and Y are hex-addressed on Mitsubishi PLCs. Parse as hex
+	// unconditionally — a hex address like "10" (=16 decimal) is ALSO
+	// valid decimal syntax, so a decimal-first-then-fallback-on-error
+	// approach silently parses it wrong instead of falling back.
 	var deviceNumberUint16 uint16
-
-	// Parse device number: try decimal first, fall back to hex if that
-	// fails or the device type is always-hex ("Y") — matches the same
-	// logic ReadData/WriteData already use, so BatchWrite stops being
-	// the odd one out for hex-addressed devices like "W".
-	val64, err := strconv.ParseInt(startDevice, 10, 64)
-	if err != nil || deviceType == "Y" {
-		val64, err = strconv.ParseInt(startDevice, 16, 64)
+	if deviceType == "Y" || deviceType == "W" {
+		val64, err := strconv.ParseInt(startDevice, 16, 64)
 		if err != nil {
 			return err
 		}
+		deviceNumberUint16 = uint16(val64)
+	} else {
+		val64, err := strconv.ParseInt(startDevice, 10, 64)
+		if err != nil {
+			return err
+		}
+		deviceNumberUint16 = uint16(val64)
 	}
-	deviceNumberUint16 = uint16(val64)
 
 	totalRegisters := (len(writeData) + 1) / 2
 	written := 0
-
-	// Start from the highest address (startDevice + totalRegisters - 1)
-	currentAddr := deviceNumberUint16 + uint16(totalRegisters-1)
 
 	for written < totalRegisters {
 		remaining := totalRegisters - written
@@ -171,19 +172,17 @@ func (m *MSPClient) BatchWrite(deviceType, startDevice string, writeData []byte,
 		if endIndex > len(writeData) {
 			endIndex = len(writeData)
 		}
-
 		chunk := writeData[startIndex:endIndex]
 
+		addr := deviceNumberUint16 + uint16(written) // forward from the real start, no top-of-range shift
+
 		if logger != nil {
-			logger.Printf("Writing to %s device number %d, chunk size %d, data % X\n", deviceType, currentAddr-uint16(written), chunkSize, chunk)
+			logger.Printf("Writing to %s device number %d, chunk size %d, data % X\n", deviceType, addr, chunkSize, chunk)
 		}
 
-		// Use the instance's client, not global msp
-		_, err = m.client.Write(deviceType, int64(currentAddr-uint16(written)), int64(chunkSize), chunk)
-		if err != nil {
+		if _, err := m.client.Write(deviceType, int64(addr), int64(chunkSize), chunk); err != nil {
 			return err
 		}
-
 		written += chunkSize
 	}
 
