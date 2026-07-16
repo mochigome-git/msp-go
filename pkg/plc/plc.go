@@ -125,6 +125,14 @@ func (m *MSPClient) WriteData(deviceType, deviceNumber string, writeData []byte,
 // numberRegisters: number of points to write.
 // writeData: the data to be written as a byte slice.
 // BatchWrite get wrap-around (overflow) and jump to lower device (reverse)
+// BatchWrite writes using the package-level MSP client initialized via InitMSPClient.
+func BatchWrite(deviceType, startDevice string, writeData []byte, maxRegistersPerWrite uint16, logger *log.Logger) error {
+	if msp == nil {
+		return fmt.Errorf("MSP client not initialized")
+	}
+	return msp.BatchWrite(deviceType, startDevice, writeData, maxRegistersPerWrite, logger)
+}
+
 func (m *MSPClient) BatchWrite(deviceType, startDevice string, writeData []byte, maxRegistersPerWrite uint16, logger *log.Logger) error {
 	if m == nil || m.client == nil {
 		return fmt.Errorf("MSP client not initialized")
