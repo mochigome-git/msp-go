@@ -131,22 +131,19 @@ func (m *MSPClient) BatchWrite(deviceType, startDevice string, writeData []byte,
 	}
 
 	var deviceNumberUint16 uint16
-	var err error
 
-	// Parse device number (hex for "Y", decimal for others)
-	if deviceType == "Y" {
-		val64, err := strconv.ParseInt(startDevice, 16, 64)
+	// Parse device number: try decimal first, fall back to hex if that
+	// fails or the device type is always-hex ("Y") — matches the same
+	// logic ReadData/WriteData already use, so BatchWrite stops being
+	// the odd one out for hex-addressed devices like "W".
+	val64, err := strconv.ParseInt(startDevice, 10, 64)
+	if err != nil || deviceType == "Y" {
+		val64, err = strconv.ParseInt(startDevice, 16, 64)
 		if err != nil {
 			return err
 		}
-		deviceNumberUint16 = uint16(val64)
-	} else {
-		val64, err := strconv.ParseInt(startDevice, 10, 64)
-		if err != nil {
-			return err
-		}
-		deviceNumberUint16 = uint16(val64)
 	}
+	deviceNumberUint16 = uint16(val64)
 
 	totalRegisters := (len(writeData) + 1) / 2
 	written := 0
