@@ -54,12 +54,19 @@ func (m *MSPClient) ReadData(ctx context.Context, deviceType string, deviceNumbe
 		return nil, fmt.Errorf("MSP client not initialized")
 	}
 
-	deviceNumberInt64, err := strconv.ParseInt(deviceNumber, 10, 64)
-	if err != nil || deviceType == "Y" {
+	// W and Y are hex-addressed on Mitsubishi PLCs. Parse as hex
+	// unconditionally — see BatchWrite's comment for why a
+	// decimal-first-then-fallback approach silently misreads addresses
+	// like "50" (valid in both bases, but means different registers).
+	var deviceNumberInt64 int64
+	var err error
+	if deviceType == "Y" || deviceType == "W" {
 		deviceNumberInt64, err = strconv.ParseInt(deviceNumber, 16, 64)
-		if err != nil {
-			return nil, err
-		}
+	} else {
+		deviceNumberInt64, err = strconv.ParseInt(deviceNumber, 10, 64)
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	resultCh := make(chan any)
