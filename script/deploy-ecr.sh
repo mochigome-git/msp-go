@@ -57,7 +57,7 @@ aws ecr get-login-password --region "${REGION}" | docker login \
 
 # --- Authenticate Docker ---
 echo "🔐 Logging into Docker Hub..."
-docker login 
+# docker login 
 
 # --- Build multi-arch image ---
 echo "🏗️  Building multi-arch image..."
@@ -79,5 +79,5 @@ echo "✅ Multi-arch image pushed successfully!"
 echo "🖇️ Tags:"
 echo "   - ${IMAGE_TAG}"
 echo "   - ${IMAGE_TAG_LATEST}"
-echo "   • ${DOCKER_IMAGE_VERSION}"
-echo "   • ${DOCKER_IMAGE_LATEST}"
+# echo "   • ${DOCKER_IMAGE_VERSION}"
+# echo "   • ${DOCKER_IMAGE_LATEST}"
