@@ -38,6 +38,10 @@ type PLCConfig struct {
 	WriteMap     string
 	CondMap      string // store conditional rules, e.g., "M64==D71,M30!=D80"
 	Brand        string // "shibaura",
+
+	// Block reads (Mitsubishi 3E only): group devices into batch reads.
+	BlockRead   bool  // BLOCK_READ / SEC_BLOCK_READ
+	BlockMaxGap int64 // BLOCK_MAX_GAP: unused words allowed inside a block (0 = default 128)
 }
 
 var Cfg AppConfig
@@ -67,6 +71,8 @@ func Load(files ...string) {
 		WriteMap:     os.Getenv("WRITE_MAP_SEC_TO_PRIM"),
 		CondMap:      os.Getenv("WRITE_MAP_SEC_TO_PRIM_CONDITION"),
 		Brand:        strings.ToLower(strings.TrimSpace(os.Getenv("MAIN_PLC_BRAND"))),
+		BlockRead:    GetEnvAsBool("BLOCK_READ", false),
+		BlockMaxGap:  int64(GetEnvAsInt("BLOCK_MAX_GAP", 0)),
 	}
 
 	secondaryPLC := PLCConfig{
@@ -81,6 +87,8 @@ func Load(files ...string) {
 		WriteMap:     os.Getenv("WRITE_MAP_PRIM_TO_SEC"),
 		CondMap:      os.Getenv("WRITE_MAP_PRIM_TO_SEC_CONDITION"),
 		Brand:        strings.ToLower(strings.TrimSpace(os.Getenv("SUB_PLC_BRAND"))),
+		BlockRead:    GetEnvAsBool("SEC_BLOCK_READ", false),
+		BlockMaxGap:  int64(GetEnvAsInt("SEC_BLOCK_MAX_GAP", 0)),
 	}
 
 	Cfg = AppConfig{

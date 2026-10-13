@@ -1,6 +1,7 @@
 package plcservice
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strconv"
@@ -17,7 +18,8 @@ import (
 type Service struct {
 	clients      map[string]plc.PLCClient
 	devices      map[string][]PLC_Utils.Device
-	fx           map[string]bool // ← per-PLC, not a single bool
+	fx           map[string]bool                  // ← per-PLC, not a single bool
+	plans        map[string]*mitsubishi.BlockPlan // block-read plan per PLC (nil = per-device reads)
 	deviceValues map[string]any
 	logger       *log.Logger
 	mu           sync.Mutex
@@ -29,6 +31,7 @@ func NewService(logger *log.Logger) *Service {
 		clients:      make(map[string]plc.PLCClient),
 		devices:      make(map[string][]PLC_Utils.Device),
 		fx:           make(map[string]bool),
+		plans:        make(map[string]*mitsubishi.BlockPlan),
 		deviceValues: make(map[string]any),
 		logger:       logger,
 	}
@@ -82,7 +85,32 @@ func (s *Service) InitPLC(cfg config.PLCConfig, deviceStrs []string) error {
 
 	s.logger.Printf("PLC %s initialized at %s:%d brand=%s fx=%v devices=%d",
 		cfg.Name, cfg.Host, cfg.Port, cfg.Brand, cfg.FxModel, len(s.devices[cfg.Name]))
+
+	if _, ok := client.(blockReader); ok && cfg.BlockRead {
+		plan := mitsubishi.PlanBlocks(s.devices[cfg.Name], cfg.FxModel,
+			mitsubishi.PlanOptions{MaxGapWords: cfg.BlockMaxGap})
+		s.plans[cfg.Name] = plan
+		s.logPlan(cfg.Name, plan)
+	}
 	return nil
+}
+
+// blockReader is implemented by clients that support batch block reads
+// (currently mitsubishi.MSPClient). PLCClient is unchanged, so Shibaura
+// and future brands are unaffected.
+type blockReader interface {
+	ReadBlock(ctx context.Context, b *mitsubishi.Block) ([]mitsubishi.BlockValue, error)
+}
+
+func (s *Service) logPlan(plcName string, p *mitsubishi.BlockPlan) {
+	s.logger.Printf("PLC %s block read: %d devices -> %d requests/cycle (%d blocks + %d single reads)",
+		plcName, len(s.devices[plcName]), p.Requests(), len(p.Blocks), len(p.Singles))
+	for _, b := range p.Blocks {
+		s.logger.Printf("  block %s%d x%d words, %d devices", b.DeviceType, b.Start, b.Words, len(b.Members))
+	}
+	for _, d := range p.Singles {
+		s.logger.Printf("  single %s%s (type %d)", d.DeviceType, d.DeviceNumber, d.NumberRegisters)
+	}
 }
 
 // FX returns the fx flag for a specific PLC by name.

@@ -69,8 +69,8 @@ func (m *MSPClient) ReadData(ctx context.Context, deviceType string, deviceNumbe
 		return nil, err
 	}
 
-	resultCh := make(chan any)
-	errCh := make(chan error)
+	resultCh := make(chan any, 1) // buffered: goroutine must not block forever if ctx times out first
+	errCh := make(chan error, 1)
 
 	go func() {
 		data, err := m.client.Read(deviceType, deviceNumberInt64, int64(numberRegisters), fx)

@@ -13,12 +13,32 @@ import (
 // parseData parses raw PLC bytes based on the register count / data type convention.
 // This is your original parseData function, unchanged.
 func parseData(data []byte, numberRegisters int, fx bool) (any, error) {
-	registerBinary, _ := mcp.NewParser().Do(data)
+	var (
+		registerBinary *mcp.Response
+		err            error
+	)
 	if fx {
-		registerBinary, _ = mcp.NewParser().DoFx(data)
+		registerBinary, err = mcp.NewParser().DoFx(data)
+	} else {
+		registerBinary, err = mcp.NewParser().Do(data)
 	}
-	data = registerBinary.Payload
+	if err != nil {
+		return nil, err
+	}
+	// A non-zero end code means the PLC rejected the request and the
+	// payload holds error info, not register data. Decoding it would
+	// publish a plausible-looking wrong value.
+	if (fx && registerBinary.EndCode != "00") || (!fx && registerBinary.EndCode != "0000") {
+		return nil, fmt.Errorf("PLC error end code %s", registerBinary.EndCode)
+	}
+	return decodeValue(registerBinary.Payload, numberRegisters)
+}
 
+// decodeValue turns a register payload (no frame header) into a value.
+// numberRegisters is the data-type code from the DEVICES config, not a
+// word count. Shared by the per-device read path and the block reader so
+// both produce byte-for-byte identical values.
+func decodeValue(data []byte, numberRegisters int) (any, error) {
 	switch numberRegisters {
 	case 1: // 16-bit unsigned
 		var val uint16

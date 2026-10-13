@@ -37,6 +37,13 @@ var deviceCodes = map[string]string{
 	"D": "A8",
 }
 
+// DeviceCode returns the 3E-frame device code for a device name and
+// whether it is supported by BuildReadRequest.
+func DeviceCode(deviceName string) (string, bool) {
+	c, ok := deviceCodes[deviceName]
+	return c, ok
+}
+
 // FX Seris device name and hex value map
 var deviceCodesFx = map[string]string{
 	"X": "2058",
