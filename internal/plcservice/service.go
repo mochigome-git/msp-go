@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mochigome-git/msp-go/pkg/config"
 	"github.com/mochigome-git/msp-go/pkg/plc"
@@ -20,6 +21,8 @@ type Service struct {
 	devices      map[string][]PLC_Utils.Device
 	fx           map[string]bool                  // ← per-PLC, not a single bool
 	plans        map[string]*mitsubishi.BlockPlan // block-read plan per PLC (nil = per-device reads)
+	down         map[string]bool                  // PLC currently unreachable
+	downUntil    map[string]time.Time             // skip reads until this time
 	deviceValues map[string]any
 	logger       *log.Logger
 	mu           sync.Mutex
@@ -32,6 +35,8 @@ func NewService(logger *log.Logger) *Service {
 		devices:      make(map[string][]PLC_Utils.Device),
 		fx:           make(map[string]bool),
 		plans:        make(map[string]*mitsubishi.BlockPlan),
+		down:         make(map[string]bool),
+		downUntil:    make(map[string]time.Time),
 		deviceValues: make(map[string]any),
 		logger:       logger,
 	}
