@@ -46,6 +46,14 @@ func (s *Service) InitPLC(cfg config.PLCConfig, deviceStrs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// An empty host usually means the env vars never reached the container
+	// (e.g. SEC_PLC_HOST not mapped in docker-compose). Skip loudly instead
+	// of creating a client that silently dials localhost.
+	if strings.TrimSpace(cfg.Host) == "" {
+		s.logger.Printf("⚠️ PLC %s: host not set, skipping (check env mapping)", cfg.Name)
+		return nil
+	}
+
 	var client plc.PLCClient
 	switch strings.ToLower(strings.TrimSpace(cfg.Brand)) {
 	case "shibaura":

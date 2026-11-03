@@ -28,7 +28,10 @@ type SimpleCondWrite struct {
 }
 
 type WriteMapWithCond struct {
-	Default map[string]WriteTarget
+	// Default maps a source address to every target it should be copied to.
+	// A slice, so "D3026>D,1,1,1;D3026>D,2,1,1" writes both D1 and D2
+	// instead of the second pair silently overwriting the first.
+	Default map[string][]WriteTarget
 	Cond    []SimpleCondWrite
 }
 
@@ -90,7 +93,7 @@ func (s *Service) WriteDevice(ctx context.Context, plcName string, device PLC_Ut
 
 // BuildWriteMap — identical to original, no changes needed.
 func BuildWriteMap(cfg config.AppConfig) WriteMapWithCond {
-	defaultMap := make(map[string]WriteTarget)
+	defaultMap := make(map[string][]WriteTarget)
 	var condRules []SimpleCondWrite
 
 	for _, plcCfg := range cfg.PLCs {
@@ -135,10 +138,10 @@ func BuildWriteMap(cfg config.AppConfig) WriteMapWithCond {
 					ProcessNumber:   uint16(processNumber),
 				}
 
-				defaultMap[src] = WriteTarget{
+				defaultMap[src] = append(defaultMap[src], WriteTarget{
 					PLCName: plcCfg.Name,
 					Device:  device,
-				}
+				})
 			}
 		}
 		condRules = append(condRules, ParseCondRules(plcCfg.CondMap)...)
@@ -191,28 +194,36 @@ func (s *Service) DirectWrite(ctx context.Context, msg map[string]any, writeMap 
 			match = bitInt != 1
 		}
 		if match {
-			if target, ok := writeMap.Default[rule.Src]; ok {
-				srcVal, exists := s.GetDeviceValue(rule.Src)
-				if !exists {
-					continue
-				}
+			targets, ok := writeMap.Default[rule.Src]
+			if !ok {
+				continue
+			}
+			srcVal, exists := s.GetDeviceValue(rule.Src)
+			if !exists {
+				continue
+			}
+			for _, target := range targets {
 				if err := s.WriteDevice(ctx, target.PLCName, target.Device, srcVal); err != nil {
 					return err
 				}
-				written[rule.Src] = true
-				s.ClearDeviceValue(rule.Src)
 			}
+			written[rule.Src] = true
+			s.ClearDeviceValue(rule.Src)
 		}
 	}
 
 	if !conditionalDevices[addr] && !written[addr] {
-		if target, ok := writeMap.Default[addr]; ok {
-			intVal, ok := toInt(value)
-			if !ok {
-				return nil
-			}
-			if intVal != 0 {
-				return s.WriteDevice(ctx, target.PLCName, target.Device, value)
+		targets, ok := writeMap.Default[addr]
+		if !ok {
+			return nil
+		}
+		intVal, ok := toInt(value)
+		if !ok || intVal == 0 { // zero values are not synced (existing behaviour)
+			return nil
+		}
+		for _, target := range targets {
+			if err := s.WriteDevice(ctx, target.PLCName, target.Device, value); err != nil {
+				return err
 			}
 		}
 	}

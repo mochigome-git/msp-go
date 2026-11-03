@@ -52,7 +52,9 @@ func toInt(val any) (int, bool) {
 // ParseCondMap parses env string like "M64==D71,M30==D80" into a map[condition]source
 func ParseCondRules(str string) []SimpleCondWrite {
 	var rules []SimpleCondWrite
-	str = strings.TrimSpace(str)
+	// Strip surrounding quotes that can leak through compose/env interpolation,
+	// e.g. "M64==D71;M80==D71" arriving with the literal quotes.
+	str = strings.Trim(strings.TrimSpace(str), `"'`)
 	if str == "" {
 		return rules
 	}
