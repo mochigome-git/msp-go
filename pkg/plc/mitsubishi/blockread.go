@@ -109,9 +109,8 @@ var bitDevices = map[string]bool{"X": true, "Y": true, "M": true, "L": true, "F"
 //
 //	1 uint16, 5 int16        → 1 word
 //	2 float32, 7 int32       → 2 words
-//	4 ASCII                  → 4 words (decodeValue currently only uses the
-//	                           first word; reading 4 matches the old request
-//	                           so a future ASCII fix still works)
+//	4 text (ASCII/SJIS/UTF-16) → 4 words (decodeValue only uses the first
+//	                           word; reading 4 matches the old request)
 //	3 bit                    → 1 point (bit devices) / 1 word (word devices)
 var spanWords = map[int]int64{1: 1, 2: 2, 3: 1, 4: 4, 5: 1, 7: 2}
 
@@ -273,13 +272,13 @@ func (m *MSPClient) ReadBlock(ctx context.Context, b *Block) ([]BlockValue, erro
 
 	out := make([]BlockValue, 0, len(b.Members))
 	for _, mem := range b.Members {
-		v, err := extractMember(payload, b, mem)
+		v, err := extractMember(payload, b, mem, m.textEnc)
 		out = append(out, BlockValue{Device: mem.Device, Value: v, Err: err})
 	}
 	return out, nil
 }
 
-func extractMember(payload []byte, b *Block, mem BlockMember) (any, error) {
+func extractMember(payload []byte, b *Block, mem BlockMember, enc TextEncoding) (any, error) {
 	if b.BitDevice {
 		rel := mem.addr - b.Start
 		if mem.typ == 3 {
@@ -287,8 +286,8 @@ func extractMember(payload []byte, b *Block, mem BlockMember) (any, error) {
 			return uint8((payload[rel/8] >> (rel % 8)) & 0x01), nil
 		}
 		off := rel / 16 * 2
-		return decodeValue(payload[off:off+spanWords[mem.typ]*2], mem.typ)
+		return decodeValue(payload[off:off+spanWords[mem.typ]*2], mem.typ, enc)
 	}
 	off := (mem.addr - b.Start) * 2
-	return decodeValue(payload[off:off+spanWords[mem.typ]*2], mem.typ)
+	return decodeValue(payload[off:off+spanWords[mem.typ]*2], mem.typ, enc)
 }

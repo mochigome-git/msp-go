@@ -1,7 +1,6 @@
 package mitsubishi
 
 import (
-	"encoding/hex"
 	"fmt"
 	"math"
 	"strconv"
@@ -12,7 +11,7 @@ import (
 
 // parseData parses raw PLC bytes based on the register count / data type convention.
 // This is your original parseData function, unchanged.
-func parseData(data []byte, numberRegisters int, fx bool) (any, error) {
+func parseData(data []byte, numberRegisters int, fx bool, enc TextEncoding) (any, error) {
 	var (
 		registerBinary *mcp.Response
 		err            error
@@ -31,14 +30,14 @@ func parseData(data []byte, numberRegisters int, fx bool) (any, error) {
 	if (fx && registerBinary.EndCode != "00") || (!fx && registerBinary.EndCode != "0000") {
 		return nil, fmt.Errorf("PLC error end code %s", registerBinary.EndCode)
 	}
-	return decodeValue(registerBinary.Payload, numberRegisters)
+	return decodeValue(registerBinary.Payload, numberRegisters, enc)
 }
 
 // decodeValue turns a register payload (no frame header) into a value.
 // numberRegisters is the data-type code from the DEVICES config, not a
 // word count. Shared by the per-device read path and the block reader so
 // both produce byte-for-byte identical values.
-func decodeValue(data []byte, numberRegisters int) (any, error) {
+func decodeValue(data []byte, numberRegisters int, enc TextEncoding) (any, error) {
 	switch numberRegisters {
 	case 1: // 16-bit unsigned
 		var val uint16
@@ -73,17 +72,16 @@ func decodeValue(data []byte, numberRegisters int) (any, error) {
 		}
 		return val, nil
 
-	case 4: // ASCII hex device
-		var val uint16
-		for i, b := range data {
-			val |= uint16(b) << (8 * i)
+	case 4: // text: ASCII / Shift-JIS kanji (auto) or UTF-16 (TEXT_ENCODING=unicode)
+		// One register is one value; only the first word is decoded, as before.
+		var lo, hi byte
+		if len(data) >= 1 {
+			lo = data[0]
 		}
-		text := fmt.Sprintf("%04X", val)
-		hexBytes, err := hex.DecodeString(text)
-		if err != nil {
-			return nil, fmt.Errorf("error decoding hexadecimal string: %w", err)
+		if len(data) >= 2 {
+			hi = data[1]
 		}
-		return string(hexBytes), nil
+		return decodeTextWord(lo, hi, enc), nil
 
 	case 5: // 16-bit signed
 		var val int16

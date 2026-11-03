@@ -20,8 +20,12 @@ import (
 
 // MSPClient wraps the MC Protocol client for Mitsubishi PLCs.
 type MSPClient struct {
-	client mcp.Client
+	client  mcp.Client
+	textEnc TextEncoding // how data type 4 registers are decoded
 }
+
+// SetTextEncoding sets how data type 4 (text) registers are decoded.
+func (m *MSPClient) SetTextEncoding(enc TextEncoding) { m.textEnc = enc }
 
 var msp *MSPClient
 
@@ -78,7 +82,7 @@ func (m *MSPClient) ReadData(ctx context.Context, deviceType string, deviceNumbe
 			errCh <- err
 			return
 		}
-		value, err := parseData(data, int(numberRegisters), fx)
+		value, err := parseData(data, int(numberRegisters), fx, m.textEnc)
 		if err != nil {
 			errCh <- err
 			return

@@ -63,6 +63,11 @@ func (s *Service) InitPLC(cfg config.PLCConfig, deviceStrs []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to connect to PLC %s: %w", cfg.Name, err)
 		}
+		enc, err := mitsubishi.ParseTextEncoding(cfg.TextEncoding)
+		if err != nil {
+			s.logger.Printf("PLC %s: %v — using auto", cfg.Name, err)
+		}
+		c.SetTextEncoding(enc)
 		client = c
 	}
 

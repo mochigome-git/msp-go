@@ -42,6 +42,10 @@ type PLCConfig struct {
 	// Block reads (Mitsubishi 3E only): group devices into batch reads.
 	BlockRead   bool  // BLOCK_READ / SEC_BLOCK_READ
 	BlockMaxGap int64 // BLOCK_MAX_GAP: unused words allowed inside a block (0 = default 128)
+
+	// TextEncoding for data type 4 registers: "auto" (ASCII + Shift-JIS, default)
+	// or "unicode" (UTF-16). TEXT_ENCODING / SEC_TEXT_ENCODING.
+	TextEncoding string
 }
 
 var Cfg AppConfig
@@ -73,6 +77,7 @@ func Load(files ...string) {
 		Brand:        strings.ToLower(strings.TrimSpace(os.Getenv("MAIN_PLC_BRAND"))),
 		BlockRead:    GetEnvAsBool("BLOCK_READ", false),
 		BlockMaxGap:  int64(GetEnvAsInt("BLOCK_MAX_GAP", 0)),
+		TextEncoding: os.Getenv("TEXT_ENCODING"),
 	}
 
 	secondaryPLC := PLCConfig{
@@ -89,6 +94,7 @@ func Load(files ...string) {
 		Brand:        strings.ToLower(strings.TrimSpace(os.Getenv("SUB_PLC_BRAND"))),
 		BlockRead:    GetEnvAsBool("SEC_BLOCK_READ", false),
 		BlockMaxGap:  int64(GetEnvAsInt("SEC_BLOCK_MAX_GAP", 0)),
+		TextEncoding: os.Getenv("SEC_TEXT_ENCODING"),
 	}
 
 	Cfg = AppConfig{
