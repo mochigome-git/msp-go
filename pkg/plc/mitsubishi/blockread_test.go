@@ -78,6 +78,7 @@ func (f *fakePLC) Read(dev string, offset, n int64, fx bool) ([]byte, error) {
 }
 
 func (f *fakePLC) Write(string, int64, int64, []byte) ([]byte, error) { return nil, nil }
+func (f *fakePLC) WriteBits(string, int64, []byte) ([]byte, error)    { return nil, nil }
 func (f *fakePLC) Close() error                                       { return nil }
 
 func dev(t string, n string, typ uint16) PLC_Utils.Device {

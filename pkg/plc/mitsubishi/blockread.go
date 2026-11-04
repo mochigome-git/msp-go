@@ -114,9 +114,14 @@ var bitDevices = map[string]bool{"X": true, "Y": true, "M": true, "L": true, "F"
 //	3 bit                    → 1 point (bit devices) / 1 word (word devices)
 var spanWords = map[int]int64{1: 1, 2: 2, 3: 1, 4: 4, 5: 1, 7: 2}
 
-// parseDeviceNumber mirrors ReadData's addressing rules exactly.
+// hexDevices are addressed in hexadecimal on Q/L/iQ-R (X3E, Y1F, B10, W2A),
+// exactly as GX Works shows them. Everything else (D, M, L, ...) is decimal.
+var hexDevices = map[string]bool{"X": true, "Y": true, "B": true, "W": true}
+
+// parseDeviceNumber is the single source of truth for device addressing,
+// used by reads, writes and the block planner alike.
 func parseDeviceNumber(deviceType, deviceNumber string) (int64, error) {
-	if deviceType == "Y" || deviceType == "W" {
+	if hexDevices[deviceType] {
 		return strconv.ParseInt(deviceNumber, 16, 64)
 	}
 	return strconv.ParseInt(deviceNumber, 10, 64)

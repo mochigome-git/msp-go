@@ -58,17 +58,8 @@ func (m *MSPClient) ReadData(ctx context.Context, deviceType string, deviceNumbe
 		return nil, fmt.Errorf("MSP client not initialized")
 	}
 
-	// W and Y are hex-addressed on Mitsubishi PLCs. Parse as hex
-	// unconditionally — see BatchWrite's comment for why a
-	// decimal-first-then-fallback approach silently misreads addresses
-	// like "50" (valid in both bases, but means different registers).
-	var deviceNumberInt64 int64
-	var err error
-	if deviceType == "Y" || deviceType == "W" {
-		deviceNumberInt64, err = strconv.ParseInt(deviceNumber, 16, 64)
-	} else {
-		deviceNumberInt64, err = strconv.ParseInt(deviceNumber, 10, 64)
-	}
+	// X, Y, B, W are hex-addressed (see parseDeviceNumber).
+	deviceNumberInt64, err := parseDeviceNumber(deviceType, deviceNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -106,12 +97,17 @@ func (m *MSPClient) WriteData(deviceType, deviceNumber string, writeData []byte,
 		return fmt.Errorf("MSP client not initialized")
 	}
 
-	deviceNumberInt64, err := strconv.ParseInt(deviceNumber, 10, 64)
-	if err != nil || deviceType == "Y" {
-		deviceNumberInt64, err = strconv.ParseInt(deviceNumber, 16, 64)
-		if err != nil {
-			return err
-		}
+	deviceNumberInt64, err := parseDeviceNumber(deviceType, deviceNumber)
+	if err != nil {
+		return err
+	}
+
+	// A single bit value (EncodeData type 3 → 1 byte) on a bit device is
+	// written in BIT units, so only that one point changes. Writing it in
+	// word units would overwrite the next 15 points too (M70 → M70..M85).
+	if bitDevices[deviceType] && len(writeData) == 1 {
+		_, err = m.client.WriteBits(deviceType, deviceNumberInt64, []byte{writeData[0] & 0x01})
+		return err
 	}
 
 	calculatedRegisters := (len(writeData) + 1) / 2
@@ -142,24 +138,14 @@ func (m *MSPClient) BatchWrite(deviceType, startDevice string, writeData []byte,
 		return fmt.Errorf("MSP client not initialized")
 	}
 
-	// W and Y are hex-addressed on Mitsubishi PLCs. Parse as hex
-	// unconditionally — a hex address like "10" (=16 decimal) is ALSO
-	// valid decimal syntax, so a decimal-first-then-fallback-on-error
-	// approach silently parses it wrong instead of falling back.
-	var deviceNumberUint16 uint16
-	if deviceType == "Y" || deviceType == "W" {
-		val64, err := strconv.ParseInt(startDevice, 16, 64)
-		if err != nil {
-			return err
-		}
-		deviceNumberUint16 = uint16(val64)
-	} else {
-		val64, err := strconv.ParseInt(startDevice, 10, 64)
-		if err != nil {
-			return err
-		}
-		deviceNumberUint16 = uint16(val64)
+	// X, Y, B, W are hex-addressed. Parse by device type, never
+	// decimal-first-then-fallback: "10" is valid in both bases but means
+	// different devices.
+	val64, err := parseDeviceNumber(deviceType, startDevice)
+	if err != nil {
+		return err
 	}
+	deviceNumberUint16 := uint16(val64)
 
 	totalRegisters := (len(writeData) + 1) / 2
 	written := 0
@@ -210,7 +196,7 @@ func IncrementDevice(device string, offset int64) (string, error) {
 	}
 
 	base := 10
-	if prefix == "Y" {
+	if hexDevices[prefix] {
 		base = 16
 	}
 	num, err := strconv.ParseInt(numStr, base, 64)

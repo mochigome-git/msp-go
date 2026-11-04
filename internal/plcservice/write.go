@@ -218,10 +218,16 @@ func (s *Service) DirectWrite(ctx context.Context, msg map[string]any, writeMap 
 			return nil
 		}
 		intVal, ok := toInt(value)
-		if !ok || intVal == 0 { // zero values are not synced (existing behaviour)
+		if !ok {
 			return nil
 		}
 		for _, target := range targets {
+			// Word targets: zero values are not synced (existing behaviour).
+			// Bit targets (type 3) mirror the source, OFF included —
+			// otherwise X3E>M70 would latch M70 ON forever.
+			if intVal == 0 && target.Device.ProcessNumber != 3 {
+				continue
+			}
 			if err := s.WriteDevice(ctx, target.PLCName, target.Device, value); err != nil {
 				return err
 			}

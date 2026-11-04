@@ -13,6 +13,8 @@ import (
 type Client interface {
 	Read(deviceName string, offset, numPoints int64, fx bool) ([]byte, error)
 	Write(deviceName string, offset, numPoints int64, writeData []byte) ([]byte, error)
+	// WriteBits writes len(bits) points in bit units (one 0/1 value each).
+	WriteBits(deviceName string, offset int64, bits []byte) ([]byte, error)
 	Close() error
 }
 
@@ -148,7 +150,35 @@ func (c *client3E) Write(deviceName string, offset, numPoints int64, writeData [
 	if err != nil {
 		return nil, err
 	}
+	return c.exchange(payload)
+}
 
+// WriteBits writes one or more points in bit units (1401 / sub 0001).
+// Unlike word writes, only the addressed points change.
+func (c *client3E) WriteBits(deviceName string, offset int64, bits []byte) ([]byte, error) {
+	if len(bits) == 0 {
+		return nil, fmt.Errorf("WriteBits: no points")
+	}
+	payload, err := hex.DecodeString(c.stn.BuildBitWriteRequest(deviceName, offset, bits))
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.exchange(payload)
+	if err != nil {
+		return nil, err
+	}
+	if len(resp) >= 11 {
+		if end := binary.LittleEndian.Uint16(resp[9:11]); end != 0 {
+			return resp, fmt.Errorf("bit write %s%d: PLC end code 0x%04X", deviceName, offset, end)
+		}
+	}
+	return resp, nil
+}
+
+// exchange sends one 3E request and reads the full response frame on the
+// shared connection.
+func (c *client3E) exchange(payload []byte) ([]byte, error) {
+	var err error
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

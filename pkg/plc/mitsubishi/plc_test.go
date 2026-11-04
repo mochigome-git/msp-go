@@ -25,6 +25,11 @@ func (m *mockClient) Read(deviceType string, deviceNumber int64, numPoints int64
 	return args.Get(0).([]byte), args.Error(1)
 }
 
+func (m *mockClient) WriteBits(deviceType string, deviceNumber int64, bits []byte) ([]byte, error) {
+	args := m.Called(deviceType, deviceNumber, bits)
+	return args.Get(0).([]byte), args.Error(1)
+}
+
 func (m *mockClient) Close() error {
 	args := m.Called()
 	return args.Error(0)
@@ -41,7 +46,7 @@ func TestWriteData_ASCIIRegisters(t *testing.T) {
 	expectedRegisters := uint16((len(data) + 1) / 2)
 
 	// Expect Write call
-	mockMCP.On("Write", "W", int64(10), int64(expectedRegisters), data).Return([]byte{}, nil).Once()
+	mockMCP.On("Write", "W", int64(0x10), int64(expectedRegisters), data).Return([]byte{}, nil).Once()
 
 	// Create MSPClient instance with mock
 	client := &MSPClient{client: mockMCP}
@@ -85,3 +90,29 @@ func TestBatchWrite(t *testing.T) {
 }
 
 // ------------------- Test ReadData -------------------
+
+// A single bit value on a bit device goes out as a bit-unit write, so only
+// that point changes (not the 16-point word).
+func TestWriteData_BitDeviceUsesBitWrite(t *testing.T) {
+	data, err := EncodeData("1", 3)
+	assert.NoError(t, err)
+
+	mockMCP := new(mockClient)
+	mockMCP.On("WriteBits", "M", int64(70), []byte{1}).Return([]byte{}, nil).Once()
+
+	client := &MSPClient{client: mockMCP}
+	assert.NoError(t, client.WriteData("M", "70", data, 1))
+	mockMCP.AssertExpectations(t)
+}
+
+// X is hex-addressed, as in GX Works: X3E is device 62.
+func TestParseDeviceNumber_XIsHex(t *testing.T) {
+	for _, c := range []struct {
+		typ, num string
+		want     int64
+	}{{"X", "3E", 62}, {"X", "76", 118}, {"B", "10", 16}, {"M", "70", 70}, {"D", "3026", 3026}} {
+		got, err := parseDeviceNumber(c.typ, c.num)
+		assert.NoError(t, err)
+		assert.Equal(t, c.want, got, c.typ+c.num)
+	}
+}

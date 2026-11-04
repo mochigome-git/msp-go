@@ -20,6 +20,9 @@ const (
 
 	WRITE_COMMAND     = "0114" // binary mode expression. if ascii mode then 1401
 	WRITE_SUB_COMMAND = "0000"
+	// bit units (0001 little-endian): one point per nibble, so writing M70
+	// touches only M70 instead of the whole word M70..M85.
+	BIT_WRITE_SUB_COMMAND = "0100"
 
 	MONITORING_TIMER = "1000" // 3[sec]
 )
@@ -272,6 +275,53 @@ func (h *station) BuildWriteRequest(deviceName string, offset, numPoints int64, 
 		MONITORING_TIMER +
 		WRITE_COMMAND +
 		WRITE_SUB_COMMAND +
+		offsetHex +
+		deviceCode +
+		points +
+		writeHex
+}
+
+// BuildBitWriteRequest builds a 3E batch write in BIT units (1401/0001).
+// bits holds one value (0 or 1) per point. In binary mode two points are
+// packed per byte: the first point in the upper nibble, the next in the
+// lower nibble; an odd count pads the last lower nibble with 0.
+func (h *station) BuildBitWriteRequest(deviceName string, offset int64, bits []byte) string {
+	deviceCode := deviceCodes[deviceName]
+
+	offsetBuff := new(bytes.Buffer)
+	_ = binary.Write(offsetBuff, binary.LittleEndian, offset)
+	offsetHex := fmt.Sprintf("%X", offsetBuff.Bytes()[0:3]) // Q/L series: 3 bytes
+
+	numPoints := int64(len(bits))
+	packed := make([]byte, (numPoints+1)/2)
+	for i, b := range bits {
+		v := b & 0x01
+		if i%2 == 0 {
+			packed[i/2] |= v << 4
+		} else {
+			packed[i/2] |= v
+		}
+	}
+	writeHex := fmt.Sprintf("%X", packed)
+
+	pointsBuff := new(bytes.Buffer)
+	_ = binary.Write(pointsBuff, binary.LittleEndian, numPoints)
+	points := fmt.Sprintf("%X", pointsBuff.Bytes()[0:2])
+
+	requestCharLen := len(MONITORING_TIMER+WRITE_COMMAND+BIT_WRITE_SUB_COMMAND+deviceCode+offsetHex+points+writeHex) / 2
+	dataLenBuff := new(bytes.Buffer)
+	_ = binary.Write(dataLenBuff, binary.LittleEndian, int64(requestCharLen))
+	dataLen := fmt.Sprintf("%X", dataLenBuff.Bytes()[0:2])
+
+	return SUB_HEADER +
+		h.networkNum +
+		h.pcNum +
+		h.unitIONum +
+		h.unitStationNum +
+		dataLen +
+		MONITORING_TIMER +
+		WRITE_COMMAND +
+		BIT_WRITE_SUB_COMMAND +
 		offsetHex +
 		deviceCode +
 		points +
