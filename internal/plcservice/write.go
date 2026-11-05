@@ -25,6 +25,10 @@ type SimpleCondWrite struct {
 	Bit      string
 	Operator string
 	Src      string
+	// PLCName is the PLC whose WriteMap this rule guards. A rule only
+	// releases targets on that PLC, so a SEC_TO_PRIM condition can never
+	// trigger a PRIM_TO_SEC write for the same source address.
+	PLCName string
 }
 
 type WriteMapWithCond struct {
@@ -33,7 +37,14 @@ type WriteMapWithCond struct {
 	// instead of the second pair silently overwriting the first.
 	Default map[string][]WriteTarget
 	Cond    []SimpleCondWrite
+	// Gated marks "<plc>|<src>" pairs that may only be written through a
+	// matching condition rule. Every source of a PLC that has a CondMap is
+	// gated — a source with no rule is never written, instead of silently
+	// falling back to an unconditional write.
+	Gated map[string]bool
 }
+
+func gateKey(plcName, src string) string { return plcName + "|" + src }
 
 // WriteDevice — identical to original except EncodeData call uses mitsubishi package.
 func (s *Service) WriteDevice(ctx context.Context, plcName string, device PLC_Utils.Device, value any) error {
@@ -91,9 +102,10 @@ func (s *Service) WriteDevice(ctx context.Context, plcName string, device PLC_Ut
 	return nil
 }
 
-// BuildWriteMap — identical to original, no changes needed.
+// BuildWriteMap parses every PLC's WriteMap and CondMap.
 func BuildWriteMap(cfg config.AppConfig) WriteMapWithCond {
 	defaultMap := make(map[string][]WriteTarget)
+	gated := make(map[string]bool)
 	var condRules []SimpleCondWrite
 
 	for _, plcCfg := range cfg.PLCs {
@@ -144,13 +156,33 @@ func BuildWriteMap(cfg config.AppConfig) WriteMapWithCond {
 				})
 			}
 		}
-		condRules = append(condRules, ParseCondRules(plcCfg.CondMap)...)
+		rules := ParseCondRules(plcCfg.CondMap)
+		if len(rules) > 0 {
+			ruled := make(map[string]bool)
+			for i := range rules {
+				rules[i].PLCName = plcCfg.Name
+				ruled[rules[i].Src] = true
+			}
+			for src, targets := range defaultMap {
+				for _, t := range targets {
+					if t.PLCName != plcCfg.Name {
+						continue
+					}
+					gated[gateKey(plcCfg.Name, src)] = true
+					if !ruled[src] {
+						log.Printf("⚠️ write map for PLC %q: source %s has a target but no condition rule — it will NOT be written (add e.g. Mxx==%s to its _CONDITION)", plcCfg.Name, src, src)
+					}
+					break
+				}
+			}
+		}
+		condRules = append(condRules, rules...)
 	}
 
-	return WriteMapWithCond{Default: defaultMap, Cond: condRules}
+	return WriteMapWithCond{Default: defaultMap, Cond: condRules, Gated: gated}
 }
 
-// DirectWrite — identical to original, no changes needed.
+// DirectWrite routes one read value to its write targets, honouring condition rules.
 func (s *Service) DirectWrite(ctx context.Context, msg map[string]any, writeMap WriteMapWithCond) error {
 	addrVal, exists := msg["address"]
 	if !exists {
@@ -164,6 +196,12 @@ func (s *Service) DirectWrite(ctx context.Context, msg map[string]any, writeMap 
 	if !exists {
 		return fmt.Errorf("missing value in message")
 	}
+
+	// Workers call DirectWrite concurrently. The store → check → write →
+	// clear sequence below must be atomic, or two workers can both see the
+	// same stored value and write it twice.
+	s.condMu.Lock()
+	defer s.condMu.Unlock()
 
 	written := make(map[string]bool)
 	conditionalDevices := make(map[string]bool)
@@ -203,6 +241,9 @@ func (s *Service) DirectWrite(ctx context.Context, msg map[string]any, writeMap 
 				continue
 			}
 			for _, target := range targets {
+				if rule.PLCName != "" && target.PLCName != rule.PLCName {
+					continue
+				}
 				if err := s.WriteDevice(ctx, target.PLCName, target.Device, srcVal); err != nil {
 					return err
 				}
@@ -222,6 +263,10 @@ func (s *Service) DirectWrite(ctx context.Context, msg map[string]any, writeMap 
 			return nil
 		}
 		for _, target := range targets {
+			// A PLC with a _CONDITION never accepts unconditional writes.
+			if writeMap.Gated[gateKey(target.PLCName, addr)] {
+				continue
+			}
 			// Word targets: zero values are not synced (existing behaviour).
 			// Bit targets (type 3) mirror the source, OFF included —
 			// otherwise X3E>M70 would latch M70 ON forever.

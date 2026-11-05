@@ -27,6 +27,7 @@ type Service struct {
 	logger       *log.Logger
 	mu           sync.Mutex
 	valuesMutex  sync.RWMutex
+	condMu       sync.Mutex // serializes DirectWrite's condition evaluation
 }
 
 func NewService(logger *log.Logger) *Service {
