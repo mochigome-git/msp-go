@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mochigome-git/msp-go/pkg/config"
 	PLC_Utils "github.com/mochigome-git/msp-go/pkg/utils"
 )
 
@@ -37,6 +38,7 @@ func (p *stubPLC) BatchWrite(string, string, []byte, uint16, *log.Logger) error 
 	return nil
 }
 func (p *stubPLC) EncodeData(string, int) ([]byte, error) { return nil, nil }
+func (p *stubPLC) Close() error                           { return nil }
 
 type countPool struct{ n int }
 
@@ -110,5 +112,35 @@ func TestReadAndEnqueue_DeviceErrorDoesNotSkipPLC(t *testing.T) {
 	s.ReadAndEnqueue(context.Background(), &countPool{})
 	if p.reads != 10 {
 		t.Fatalf("device-level errors: %d reads, want 10", p.reads)
+	}
+}
+
+func TestInitPLC_RejectsInvalidDevices(t *testing.T) {
+	for _, devs := range []string{
+		"D,0",     // not a triple
+		"D,0,x",   // bad type
+		"D,0,9",   // unknown data type code
+		"R,0,1",   // device the 3E builder can't encode
+		"X,ZZ,3",  // X is hex-addressed
+		"D,abc,1", // bad number
+	} {
+		s := NewService(log.New(&bytes.Buffer{}, "", 0))
+		err := s.InitPLC(config.PLCConfig{Name: "main", Host: "127.0.0.1", Port: 5011}, []string{devs})
+		if err == nil {
+			t.Errorf("devices %q: expected error", devs)
+		}
+	}
+
+	s := NewService(log.New(&bytes.Buffer{}, "", 0))
+	if err := s.InitPLC(config.PLCConfig{Name: "main", Host: "127.0.0.1", Port: 5011},
+		[]string{"D,0,1,X,3E,3", "", "D,10,7"}); err != nil {
+		t.Fatalf("valid devices rejected: %v", err)
+	}
+	if n := len(s.Devices("main")); n != 3 {
+		t.Fatalf("got %d devices, want 3", n)
+	}
+	if err := NewService(log.New(&bytes.Buffer{}, "", 0)).InitPLC(
+		config.PLCConfig{Name: "main", Host: "127.0.0.1", Brand: "siemens"}, nil); err == nil {
+		t.Fatal("unknown brand accepted")
 	}
 }

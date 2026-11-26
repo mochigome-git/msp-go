@@ -47,6 +47,13 @@ func DeviceCode(deviceName string) (string, bool) {
 	return c, ok
 }
 
+// DeviceCodeFx returns the 1E-frame (FX series) device code for a device
+// name and whether it is supported by BuildReadRequestFx.
+func DeviceCodeFx(deviceName string) (string, bool) {
+	c, ok := deviceCodesFx[deviceName]
+	return c, ok
+}
+
 // FX Seris device name and hex value map
 var deviceCodesFx = map[string]string{
 	"X": "2058",
@@ -326,8 +333,4 @@ func (h *station) BuildBitWriteRequest(deviceName string, offset int64, bits []b
 		deviceCode +
 		points +
 		writeHex
-}
-
-func (h *station) BuildAccessPath() {
-
 }

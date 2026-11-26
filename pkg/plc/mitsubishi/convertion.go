@@ -10,7 +10,6 @@ import (
 )
 
 // parseData parses raw PLC bytes based on the register count / data type convention.
-// This is your original parseData function, unchanged.
 func parseData(data []byte, numberRegisters int, fx bool, enc TextEncoding) (any, error) {
 	var (
 		registerBinary *mcp.Response
@@ -113,8 +112,6 @@ func decodeValue(data []byte, numberRegisters int, enc TextEncoding) (any, error
 }
 
 // EncodeData encodes a value string into bytes for PLC writing.
-// Moved here from the old pkg/plc package — callers import from mitsubishi now.
-// plcservice/write.go: change import to pkg/plc/mitsubishi and call mitsubishi.EncodeData
 func EncodeData(valueStr string, ProcessNumber int) ([]byte, error) {
 	valueStr = strings.TrimSpace(valueStr)
 

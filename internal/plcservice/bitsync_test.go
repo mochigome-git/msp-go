@@ -26,6 +26,7 @@ func (p *recPLC) WriteData(dt, dn string, data []byte, _ uint16) error {
 	return nil
 }
 func (p *recPLC) BatchWrite(string, string, []byte, uint16, *log.Logger) error { return nil }
+func (p *recPLC) Close() error                                                 { return nil }
 func (p *recPLC) EncodeData(v string, proc int) ([]byte, error) {
 	if proc == 3 {
 		if v == "1" {
@@ -44,7 +45,7 @@ func TestDirectWrite_BitTargetSyncsZero(t *testing.T) {
 	s := NewService(log.New(&discard{}, "", 0))
 	s.clients["secondary"] = sec
 
-	wm := BuildWriteMap(config.AppConfig{PLCs: []config.PLCConfig{
+	wm := mustWriteMap(t, config.AppConfig{PLCs: []config.PLCConfig{
 		{Name: "secondary", WriteMap: "D3026>D,1,1,1;X3E>M,70,3,1"},
 	}})
 	ctx := context.Background()
@@ -69,6 +70,15 @@ func TestDirectWrite_BitTargetSyncsZero(t *testing.T) {
 			t.Errorf("write %d = %s, want %s", i, sec.writes[i], want[i])
 		}
 	}
+}
+
+func mustWriteMap(t *testing.T, cfg config.AppConfig) WriteMapWithCond {
+	t.Helper()
+	wm, err := ParseWriteMap(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wm
 }
 
 type discard struct{}

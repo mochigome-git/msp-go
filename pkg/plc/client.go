@@ -42,4 +42,7 @@ type PLCClient interface {
 	// EncodeData converts a string value to PLC-ready bytes.
 	// Each brand implements its own encoding format.
 	EncodeData(valueStr string, processNumber int) ([]byte, error)
+
+	// Close releases the connection to the PLC.
+	Close() error
 }

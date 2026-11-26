@@ -18,8 +18,10 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -39,6 +41,10 @@ type Client struct {
 	port    int
 	unitID  byte
 	timeout time.Duration
+
+	mu   sync.Mutex // serializes requests on conn
+	conn net.Conn   // reused across requests; dropped on any error
+	txID uint16
 }
 
 // NewClient creates a Shibaura test client.
@@ -124,6 +130,9 @@ func (c *Client) ReadDiscreteInputs(startAddr, count uint16) ([]bool, error) {
 //	everything else → FC03 Holding Registers (D, W, R, H, G data registers)
 //
 // deviceNumber: decimal string address (e.g. "0", "100")
+// numberRegisters: how many registers/bits to read. NOTE: unlike the
+// Mitsubishi driver, where the third DEVICES field is a data-type code,
+// here it is a plain count and the value is a []uint16 or []bool.
 // fx is accepted for interface compatibility but ignored.
 func (c *Client) ReadData(
 	ctx context.Context,
@@ -174,31 +183,76 @@ func (c *Client) BatchWrite(
 // ── internal Modbus TCP framing ───────────────────────────────────────────────
 
 func (c *Client) modbusRequest(fc byte, addr, count uint16) ([]byte, error) {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", c.host, c.port), c.timeout)
-	if err != nil {
-		return nil, fmt.Errorf("shibaura: connect %s:%d: %w", c.host, c.port, err)
+	if count == 0 {
+		return nil, fmt.Errorf("shibaura: count must be > 0")
 	}
-	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(c.timeout))
 
-	// Modbus TCP ADU: MBAP header (7 bytes) + PDU (6 bytes)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.conn == nil {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", c.host, c.port), c.timeout)
+		if err != nil {
+			return nil, fmt.Errorf("shibaura: connect %s:%d: %w", c.host, c.port, err)
+		}
+		c.conn = conn
+	}
+	_ = c.conn.SetDeadline(time.Now().Add(c.timeout))
+
+	c.txID++
+	txID := c.txID
+
+	// Modbus TCP ADU: MBAP header (7 bytes) + PDU (5 bytes)
 	req := make([]byte, 12)
-	req[0], req[1] = 0x00, 0x01 // transaction ID
-	req[2], req[3] = 0x00, 0x00 // protocol ID (always 0 for Modbus)
-	req[4], req[5] = 0x00, 0x06 // remaining length
+	binary.BigEndian.PutUint16(req[0:], txID) // transaction ID
+	req[2], req[3] = 0x00, 0x00               // protocol ID (always 0 for Modbus)
+	req[4], req[5] = 0x00, 0x06               // remaining length
 	req[6] = c.unitID
 	req[7] = fc
 	binary.BigEndian.PutUint16(req[8:], addr)
 	binary.BigEndian.PutUint16(req[10:], count)
 
-	if _, err := conn.Write(req); err != nil {
+	payload, err := c.roundTrip(req, txID)
+	if err != nil {
+		c.dropConn()
+		return nil, err
+	}
+
+	// payload[0] = echoed FC (or FC|0x80 on error)
+	// payload[1] = byte count (normal) or exception code (error)
+	// payload[2:] = register data
+	if payload[0]&0x80 != 0 {
+		return nil, fmt.Errorf("shibaura: modbus exception fc=0x%02X code=%d", payload[0], payload[1])
+	}
+	if payload[0] != fc {
+		c.dropConn()
+		return nil, fmt.Errorf("shibaura: response fc=0x%02X, want 0x%02X", payload[0], fc)
+	}
+
+	want := int(count) * 2 // registers
+	if fc == 0x01 || fc == 0x02 {
+		want = (int(count) + 7) / 8 // bits
+	}
+	data := payload[2:]
+	if int(payload[1]) != len(data) || len(data) < want {
+		c.dropConn()
+		return nil, fmt.Errorf("shibaura: short response: byte count %d, got %d bytes, want %d", payload[1], len(data), want)
+	}
+	return data, nil
+}
+
+func (c *Client) roundTrip(req []byte, txID uint16) ([]byte, error) {
+	if _, err := c.conn.Write(req); err != nil {
 		return nil, fmt.Errorf("shibaura: send: %w", err)
 	}
 
 	// Read MBAP header to get payload length
 	header := make([]byte, 7)
-	if _, err := readFull(conn, header); err != nil {
+	if _, err := io.ReadFull(c.conn, header); err != nil {
 		return nil, fmt.Errorf("shibaura: read header: %w", err)
+	}
+	if got := binary.BigEndian.Uint16(header[0:2]); got != txID {
+		return nil, fmt.Errorf("shibaura: transaction id %d, want %d", got, txID)
 	}
 
 	// length field includes unit ID (already in header[6]), subtract 1
@@ -208,30 +262,25 @@ func (c *Client) modbusRequest(fc byte, addr, count uint16) ([]byte, error) {
 	}
 
 	payload := make([]byte, payloadLen)
-	if _, err := readFull(conn, payload); err != nil {
+	if _, err := io.ReadFull(c.conn, payload); err != nil {
 		return nil, fmt.Errorf("shibaura: read payload: %w", err)
 	}
-
-	// payload[0] = echoed FC (or FC|0x80 on error)
-	// payload[1] = byte count (normal) or exception code (error)
-	// payload[2:] = register data
-	if payload[0]&0x80 != 0 {
-		return nil, fmt.Errorf("shibaura: modbus exception fc=0x%02X code=%d", payload[0], payload[1])
-	}
-
-	return payload[2:], nil
+	return payload, nil
 }
 
-func readFull(conn net.Conn, buf []byte) (int, error) {
-	total := 0
-	for total < len(buf) {
-		n, err := conn.Read(buf[total:])
-		total += n
-		if err != nil {
-			return total, err
-		}
+func (c *Client) dropConn() {
+	if c.conn != nil {
+		c.conn.Close()
+		c.conn = nil
 	}
-	return total, nil
+}
+
+// Close closes the connection to the PLC.
+func (c *Client) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.dropConn()
+	return nil
 }
 
 func rawToUint16(raw []byte) []uint16 {
@@ -243,6 +292,9 @@ func rawToUint16(raw []byte) []uint16 {
 }
 
 func rawToBits(raw []byte, count uint16) []bool {
+	if max := uint16(len(raw)) * 8; count > max {
+		count = max
+	}
 	out := make([]bool, count)
 	for i := uint16(0); i < count; i++ {
 		out[i] = (raw[i/8]>>(i%8))&1 == 1

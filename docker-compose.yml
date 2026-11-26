@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   msp:
     container_name: msp-go
@@ -8,6 +6,10 @@ services:
     stop_grace_period: 30s
     env_file:
       - .env.local
+    # Only needed when MQTTS_ON=true with certificate files.
+    # The container runs as uid 65532: make the files readable by it.
+    # volumes:
+    #   - ./certs:/app/certs:ro
     logging:
       driver: "json-file"
       options:

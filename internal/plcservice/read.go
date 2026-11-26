@@ -81,6 +81,8 @@ func (s *Service) markDown(plcName string, err error) {
 	s.down[plcName] = true
 	s.downUntil[plcName] = time.Now().Add(unreachableBackoff)
 	s.mu.Unlock()
+	// Its cached values can no longer be trusted as write conditions.
+	s.clearValuesFrom(plcName)
 	if !wasDown {
 		s.logger.Printf("[%s] PLC unreachable: %v — skipping its reads, retrying every %s",
 			plcName, err, unreachableBackoff)
@@ -183,7 +185,7 @@ func (s *Service) readOne(ctx context.Context, wp WorkerPool, plcName string, de
 func (s *Service) ReadDevice(ctx context.Context, plcName string, device PLC_Utils.Device) (any, error) {
 	s.mu.Lock()
 	client, ok := s.clients[plcName]
-	fx := s.fx[plcName] // ← look up by PLC name
+	fx := s.fx[plcName]
 	s.mu.Unlock()
 
 	if !ok {

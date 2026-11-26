@@ -2,6 +2,7 @@ package plcservice
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -19,11 +20,12 @@ import (
 type Service struct {
 	clients      map[string]plc.PLCClient
 	devices      map[string][]PLC_Utils.Device
-	fx           map[string]bool                  // ← per-PLC, not a single bool
+	fx           map[string]bool                  // per-PLC FX (1E frame) flag
 	plans        map[string]*mitsubishi.BlockPlan // block-read plan per PLC (nil = per-device reads)
 	down         map[string]bool                  // PLC currently unreachable
 	downUntil    map[string]time.Time             // skip reads until this time
-	deviceValues map[string]any
+	deviceValues map[string]storedValue           // latest values used by write conditions
+	valueMaxAge  time.Duration                    // stored values older than this are ignored
 	logger       *log.Logger
 	mu           sync.Mutex
 	valuesMutex  sync.RWMutex
@@ -38,9 +40,30 @@ func NewService(logger *log.Logger) *Service {
 		plans:        make(map[string]*mitsubishi.BlockPlan),
 		down:         make(map[string]bool),
 		downUntil:    make(map[string]time.Time),
-		deviceValues: make(map[string]any),
+		deviceValues: make(map[string]storedValue),
+		valueMaxAge:  defaultValueMaxAge,
 		logger:       logger,
 	}
+}
+
+// storedValue is a cached read used to evaluate write conditions.
+type storedValue struct {
+	value  any
+	source string // PLC the value was read from ("" if unknown)
+	at     time.Time
+}
+
+// defaultValueMaxAge: a condition bit or source value that hasn't been
+// refreshed for this long is treated as unknown, so a stale "machine
+// running" bit can't keep authorising writes.
+const defaultValueMaxAge = 30 * time.Second
+
+// SetPollInterval adapts the stale-value limit to the polling rate: values
+// must be at least a few cycles old before they are considered stale.
+func (s *Service) SetPollInterval(d time.Duration) {
+	s.valuesMutex.Lock()
+	defer s.valuesMutex.Unlock()
+	s.valueMaxAge = max(defaultValueMaxAge, 3*d)
 }
 
 func (s *Service) InitPLC(cfg config.PLCConfig, deviceStrs []string) error {
@@ -56,10 +79,11 @@ func (s *Service) InitPLC(cfg config.PLCConfig, deviceStrs []string) error {
 	}
 
 	var client plc.PLCClient
-	switch strings.ToLower(strings.TrimSpace(cfg.Brand)) {
+	cfg.Brand = strings.ToLower(strings.TrimSpace(cfg.Brand))
+	switch cfg.Brand {
 	case "shibaura":
 		client = shibaura.NewClient(cfg.Host, cfg.Port, 1)
-	default: // "mitsubishi" or empty
+	case "", "mitsubishi":
 		c, err := mitsubishi.NewMSPClient(cfg.Host, cfg.Port)
 		if err != nil {
 			return fmt.Errorf("failed to connect to PLC %s: %w", cfg.Name, err)
@@ -70,37 +94,34 @@ func (s *Service) InitPLC(cfg config.PLCConfig, deviceStrs []string) error {
 		}
 		c.SetTextEncoding(enc)
 		client = c
+	default:
+		return fmt.Errorf("PLC %s: unknown brand %q (use mitsubishi or shibaura)", cfg.Name, cfg.Brand)
 	}
 
 	s.clients[cfg.Name] = client
-	s.fx[cfg.Name] = cfg.FxModel // ← per-PLC now
+	s.fx[cfg.Name] = cfg.FxModel
 
-	for _, devStr := range deviceStrs {
-		devStr = strings.TrimSpace(devStr)
-		if devStr == "" {
-			continue
-		}
-		parts := strings.Split(devStr, ",")
-		if len(parts)%3 != 0 {
-			s.logger.Printf("Skipping invalid device string: '%s'", devStr)
-			continue
-		}
-		for i := 0; i < len(parts); i += 3 {
-			deviceType := strings.TrimSpace(parts[i])
-			deviceNumber := strings.TrimSpace(parts[i+1])
-			numRegs := 1
-			if n, err := strconv.Atoi(strings.TrimSpace(parts[i+2])); err == nil {
-				numRegs = n
-			} else {
-				s.logger.Printf("Invalid number of registers '%s', defaulting to 1", parts[i+2])
+	isMitsubishi := cfg.Brand == "" || cfg.Brand == "mitsubishi"
+	devices, err := parseDevices(deviceStrs)
+	if err != nil {
+		client.Close()
+		return fmt.Errorf("PLC %s: %w", cfg.Name, err)
+	}
+	var errs []error
+	for _, d := range devices {
+		if isMitsubishi {
+			if err := mitsubishi.ValidateReadDevice(d, cfg.FxModel); err != nil {
+				errs = append(errs, err)
 			}
-			s.devices[cfg.Name] = append(s.devices[cfg.Name], PLC_Utils.Device{
-				DeviceType:      deviceType,
-				DeviceNumber:    deviceNumber,
-				NumberRegisters: uint16(numRegs),
-			})
+		} else if d.NumberRegisters == 0 {
+			errs = append(errs, fmt.Errorf("%s%s: count must be >= 1", d.DeviceType, d.DeviceNumber))
 		}
 	}
+	if err := errors.Join(errs...); err != nil {
+		client.Close()
+		return fmt.Errorf("PLC %s: invalid DEVICES entry:\n%w", cfg.Name, err)
+	}
+	s.devices[cfg.Name] = devices
 
 	s.logger.Printf("PLC %s initialized at %s:%d brand=%s fx=%v devices=%d",
 		cfg.Name, cfg.Host, cfg.Port, cfg.Brand, cfg.FxModel, len(s.devices[cfg.Name]))
@@ -133,7 +154,6 @@ func (s *Service) logPlan(plcName string, p *mitsubishi.BlockPlan) {
 }
 
 // FX returns the fx flag for a specific PLC by name.
-// Replace all uses of s.fx with s.FX("main") / s.FX("secondary").
 func (s *Service) FX(plcName string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -158,17 +178,34 @@ func (s *Service) Devices(plcName string) []PLC_Utils.Device {
 	return s.devices[plcName]
 }
 
-func (s *Service) StoreDeviceValue(address string, value any) {
-	s.valuesMutex.Lock()
-	defer s.valuesMutex.Unlock()
-	s.deviceValues[address] = value
+// HasDevices reports whether any initialised PLC has devices to read.
+func (s *Service) HasDevices() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, d := range s.devices {
+		if len(d) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
+// StoreDeviceValue caches a value read from PLC source.
+func (s *Service) StoreDeviceValue(address string, value any, source string) {
+	s.valuesMutex.Lock()
+	defer s.valuesMutex.Unlock()
+	s.deviceValues[address] = storedValue{value: value, source: source, at: time.Now()}
+}
+
+// GetDeviceValue returns a cached value, or false if it is missing or stale.
 func (s *Service) GetDeviceValue(address string) (any, bool) {
 	s.valuesMutex.RLock()
 	defer s.valuesMutex.RUnlock()
-	value, exists := s.deviceValues[address]
-	return value, exists
+	v, ok := s.deviceValues[address]
+	if !ok || time.Since(v.at) > s.valueMaxAge {
+		return nil, false
+	}
+	return v.value, true
 }
 
 func (s *Service) ClearDeviceValue(address string) {
@@ -177,14 +214,55 @@ func (s *Service) ClearDeviceValue(address string) {
 	delete(s.deviceValues, address)
 }
 
-func (s *Service) ClearAllDeviceValues() {
+// clearValuesFrom drops every cached value read from plcName, e.g. when
+// that PLC becomes unreachable and its last values can no longer be trusted.
+func (s *Service) clearValuesFrom(plcName string) {
 	s.valuesMutex.Lock()
 	defer s.valuesMutex.Unlock()
-	s.deviceValues = make(map[string]any)
+	for addr, v := range s.deviceValues {
+		if v.source == plcName {
+			delete(s.deviceValues, addr)
+		}
+	}
 }
 
+// Close closes every PLC connection.
 func (s *Service) Close() {
-	for plcName := range s.clients {
-		s.logger.Printf("Closing PLC client %s", plcName)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for name, c := range s.clients {
+		if err := c.Close(); err != nil {
+			s.logger.Printf("Closing PLC client %s: %v", name, err)
+		}
 	}
+}
+
+// parseDevices parses DEVICES_* strings: "TYPE,NUMBER,N" triples, comma
+// separated. Any malformed entry is an error.
+func parseDevices(deviceStrs []string) ([]PLC_Utils.Device, error) {
+	var devices []PLC_Utils.Device
+	for _, devStr := range deviceStrs {
+		devStr = strings.Trim(strings.TrimSpace(devStr), `"'`)
+		if devStr == "" {
+			continue
+		}
+		parts := strings.Split(devStr, ",")
+		if len(parts)%3 != 0 {
+			return nil, fmt.Errorf("device list %q: expected TYPE,NUMBER,N triples", devStr)
+		}
+		for i := 0; i < len(parts); i += 3 {
+			deviceType := strings.TrimSpace(parts[i])
+			deviceNumber := strings.TrimSpace(parts[i+1])
+			n, err := strconv.ParseUint(strings.TrimSpace(parts[i+2]), 10, 16)
+			if deviceType == "" || deviceNumber == "" || err != nil {
+				return nil, fmt.Errorf("device list %q: bad entry %q", devStr, strings.Join(parts[i:i+3], ","))
+			}
+			devices = append(devices, PLC_Utils.Device{
+				DeviceType:      deviceType,
+				DeviceNumber:    deviceNumber,
+				NumberRegisters: uint16(n),
+			})
+		}
+	}
+	return devices, nil
 }

@@ -12,8 +12,8 @@ import (
 
 // The MCS_SYNC config: D71/D72 (secondary) → D3026 (main), guarded by
 // "M64==D71;M80==D71". D72 has no rule, so it must never reach main.
-func mcsSyncMap() WriteMapWithCond {
-	return BuildWriteMap(config.AppConfig{PLCs: []config.PLCConfig{
+func mcsSyncMap(t *testing.T) WriteMapWithCond {
+	return mustWriteMap(t, config.AppConfig{PLCs: []config.PLCConfig{
 		{Name: "main", WriteMap: "D71>D,3026,1,1;D72>D,3026,1,1", CondMap: `"M64==D71;M80==D71"`},
 		{Name: "secondary", WriteMap: "D3026>D,1,1,1;D3026>D,2,1,1;X3E>M,70,3,1"},
 	}})
@@ -23,7 +23,7 @@ func TestDirectWrite_ConditionGatesSecToPrim(t *testing.T) {
 	main, sec := &recPLC{}, &recPLC{}
 	s := NewService(log.New(&discard{}, "", 0))
 	s.clients["main"], s.clients["secondary"] = main, sec
-	wm := mcsSyncMap()
+	wm := mcsSyncMap(t)
 	ctx := context.Background()
 
 	step := func(addr string, v any) {
@@ -61,11 +61,11 @@ func TestDirectWrite_ConcurrentConditionWritesOnce(t *testing.T) {
 	main := &recPLC{}
 	s := NewService(log.New(&discard{}, "", 0))
 	s.clients["main"], s.clients["secondary"] = main, &recPLC{}
-	wm := mcsSyncMap()
+	wm := mcsSyncMap(t)
 	ctx := context.Background()
 
 	_ = s.DirectWrite(ctx, map[string]any{"address": "D71", "value": uint16(7)}, wm)
-	s.StoreDeviceValue("M64", uint8(1))
+	s.StoreDeviceValue("M64", uint8(1), "main")
 
 	var wg sync.WaitGroup
 	for i := 0; i < 15; i++ {

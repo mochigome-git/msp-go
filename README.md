@@ -1,95 +1,105 @@
 # mochigome-git:msp-go
 
-Overview:
-This Docker image provides a solution for extracting data from Mitsubishi brand Programmable Logic Controllers (PLCs) using 1E Frame or 3C Frame communication protocols and publishing it via MQTT (Message Queuing Telemetry Transport).
+Reads data from Mitsubishi PLCs over the MC protocol (SLMP) and publishes it
+to an MQTT broker, or copies values directly between two PLCs.
 
-Features:
+- **Mitsubishi**: 3E frame binary (iQ-R / Q / L) or 1E frame (FX series, `PLC_MODEL=true`)
+- **Shibaura** (experimental, read-only): Modbus TCP probe for injection molding machines
+- **MQTT**: plain TCP or TLS (AWS IoT style client certificates), automatic reconnect
+- **Block reads**: group nearby devices into batch reads to save PLC scan time
+- **Direct mode** (`MQTT_SKIP=true`): copy values between the main and secondary PLC, optionally gated by interlock bits
 
-PLC Connectivity: Supports communication with Mitsubishi brand PLCs using 1E Frame or 3C Frame protocols.
-Data Extraction: Extracts data from PLCs for monitoring and control purposes.
-MQTT Integration: Publishes the extracted data to MQTT brokers for real-time data streaming and analysis.
-Scalability: Built on Docker, allowing easy deployment and scaling across different environments.
-Flexibility: Supports customization and configuration to adapt to various PLC setups and MQTT configurations.
-Security: Utilizes TLS/SSL for secure communication between components, ensuring data integrity and confidentiality.
-Usage:
-
-Docker Run Command: Run the Docker container with appropriate environment variables and settings for connecting to the Mitsubishi PLC and MQTT broker.
-You can use this Docker Compose file to run the container with the specified environment variables. Make sure to replace ${MQTT_HOST}, ${MQTT_TOPIC}, ${PLC_HOST}, ${PLC_PORT}, ${DEVICES_2bit}, ${DEVICES_16bit}, and ${DEVICES_32bit} with the appropriate values for your environment.
-
-docker-compose.yml:
+## Quick start
 
 ```bash
-version: '3'
+cp .env.local.example .env.local   # then edit it
+docker compose up -d
+```
 
+`docker-compose.yml`:
+
+```yaml
 services:
-  nk3-msp-pub:
-    container_name: nk3-msp-pub
-    image: mochigome/msp-go:2.0v
+  msp:
+    container_name: msp-go
+    image: mochigome/msp-go:2.22.5
     restart: always
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "20m"
-        max-file: "10"
-    environment:
-      MQTT_HOST: "${MQTT_HOST}"
-      MQTT_TOPIC: "${MQTT_TOPIC}"
-      PLC_HOST: "${PLC_HOST}"
-      PLC_PORT: "${PLC_PORT}"
-      DEVICES_2bit: "${DEVICES_2bit}"
-      DEVICES_16bit: "${DEVICES_16bit}"
-      DEVICES_32bit: "${DEVICES_32bit}"
-      MQTTS_ON: ${MQTTS_ON}
-      MQTT_CA_CERTIFICATE: ${MQTT_CA_CERTIFICATE}
-      MQTT_CLIENT_CERTIFICATE: ${MQTT_CLIENT_CERTIFICATE}
-      MQTT_PRIVATE_KEY: ${MQTT_PRIVATE_KEY}
-    volumes:
-      - ./certs:/etc/msp/certs:ro
+    stop_grace_period: 30s
+    env_file:
+      - .env.local
+    # with MQTTS_ON=true and certificate files:
+    # volumes:
+    #   - ./certs:/app/certs:ro
 ```
 
-.env :
+The container runs as a non-root user (uid 65532); mounted certificate files
+must be readable by it.
+
+## Configuration
+
+Every option is documented in [`.env.local.example`](.env.local.example). Any
+value that cannot be parsed, any malformed `DEVICES_*` entry, and any
+malformed write map **stops startup with an error** rather than being skipped.
+
+### Devices
+
+`DEVICES_*` is a comma-separated list of `TYPE,NUMBER,DATATYPE` triples:
+
+| DATATYPE | Meaning |
+|---|---|
+| 1 | 16-bit unsigned |
+| 2 | 32-bit float |
+| 3 | bit |
+| 4 | text (`TEXT_ENCODING=auto` ASCII/Shift-JIS, or `unicode`) |
+| 5 | 16-bit signed |
+| 6 | FX ×10 value |
+| 7 | 32-bit signed |
+
+`X`, `Y`, `B`, `W` numbers are hexadecimal (`X,3E,3`), all others decimal.
+For a Shibaura PLC the third field is a register/bit **count** instead.
+
+### MQTT
+
+Each value is published as JSON `{"address":"D100","value":123,"source":"main"}`
+to `<MQTT_TOPIC><address>`, or to `<MQTT_TOPIC><plc>/<address>` with
+`MQTT_TOPIC_INCLUDE_SOURCE=true`.
+
+| Option | Default | |
+|---|---|---|
+| `MQTT_CLIENT_ID` | `msp-go-<hostname>` | must be unique per broker |
+| `POLL_INTERVAL_MS` | `0` | pause between read cycles; 0 = continuous |
+| `PUBLISH_ON_CHANGE` | `false` | publish only changed values… |
+| `PUBLISH_REFRESH_SEC` | `60` | …plus a full refresh this often |
+| `MQTTS_ON` | `false` | TLS; certificates from `MQTT_CA_CERTIFICATE` / `MQTT_CLIENT_CERTIFICATE` / `MQTT_PRIVATE_KEY` files, or PEM contents in `ECS_MQTT_*` |
+
+If the broker is down the service keeps reading and retries the connection;
+messages are dropped (QoS 0) until it reconnects.
+
+### Direct writes between PLCs (`MQTT_SKIP=true`)
+
 ```bash
-############
-# Secrets 
-# YOU MUST CHANGE THESE BEFORE GOING INTO PRODUCTION
-############
-
-PLC_HOST=192.168.3.21
-PLC_PORT=5011
-
-############
-# MQTT 
-############
-
-# MQTT over SSL use mqtts, MQTT non SSL use tcp
-MQTT_HOST=tcp://$IP_ADDRESS:1883  
-MQTT_TOPIC="test/topic/"
-
-# "mean" to post the average of values 
-# "first" to post the first element
-KEY_OPTION=mean
-
-############
-# DEVICES NO
-############
-
-DEVICES_16bit=D,0,1,D,1,1,D,2,1,D,3,1
-DEVICES_32bit=D,650,2,D,676,2,D,106,2
-DEVICES_2bit=M,24,3,M,25,3,M,26,3
+# copy D100 (read from either PLC) into main D200, and X3E into main M70 as a bit
+WRITE_MAP_SEC_TO_PRIM=D100>D,200,1,1;X3E>M,70,3
+# only while M64 is 1
+WRITE_MAP_SEC_TO_PRIM_CONDITION=M64==D100;M64==X3E
 ```
 
-Example:
+Entry format: `SRC>TYPE,NUMBER[,WRITETYPE[,REGS]]`. Condition format:
+`BIT==SRC` (write while BIT is 1) or `BIT!=SRC` (write while BIT is not 1).
+Once a PLC has a `_CONDITION`, sources without a rule are never written.
+Condition values from a PLC that becomes unreachable, or older than 30 s,
+are ignored. `WRITE_MAP_PRIM_TO_SEC` is the reverse direction.
+
+## Development
 
 ```bash
-docker-compose up -d
+go test -race ./...
 ```
 
-Note: Ensure that appropriate network configurations and security measures are in place to protect sensitive data and maintain system integrity.
+Diagnostics: `PPROF_PORT=6060` serves pprof on `127.0.0.1` inside the
+container; `PERF_MONITOR=true` prints message throughput every second.
 
-License: none
+## Links
 
-Source Code: [GitHub](https://github.com/mochigome-git/msp-go/tree/main)
-
-Docker Hub: [mochigome/msp-go](https://hub.docker.com/repository/docker/mochigome/msp-go/general)
-
-Maintainer: [mochigome-git](https://github.com/mochigome-git)
+- Source: [GitHub](https://github.com/mochigome-git/msp-go)
+- Docker Hub: [mochigome/msp-go](https://hub.docker.com/r/mochigome/msp-go)

@@ -27,8 +27,6 @@ type client3E struct {
 	conn net.Conn
 	// Mutex to synchronize access to conn
 	mu sync.Mutex
-
-	fx bool
 }
 
 func New3EClient(host string, port int, stn *station) (Client, error) {
@@ -75,11 +73,7 @@ func (c *client3E) Read(deviceName string, offset int64, numPoints int64, fx boo
 
 	var response []byte
 	if fx {
-		// 1E frame: no length field in the header; keep the original
-		// single-read behaviour.
-		readBuff := make([]byte, 22+2*numPoints)
-		n, rerr := c.conn.Read(readBuff)
-		response, err = readBuff[:n], rerr
+		response, err = readResponse1E(c.conn, fxDataLen(numPoints))
 	} else {
 		response, err = readResponse3E(c.conn)
 	}
@@ -120,6 +114,59 @@ func readResponse3E(conn net.Conn) ([]byte, error) {
 	return resp, nil
 }
 
+// fxDataLen is the payload size of a successful 1E read response for the
+// numPoints value BuildReadRequestFx receives: 6 means one bit point (bit
+// units pack 2 points per byte), anything else is that many words.
+func fxDataLen(numPoints int64) int {
+	if numPoints == 6 {
+		return 1
+	}
+	return int(2 * numPoints)
+}
+
+// readResponse1E reads exactly one 1E-frame binary response.
+//
+// The 1E header has no length field: subheader(1) + end code(1), then
+// dataLen bytes on success. On end code 0x5B the PLC appends a 1-byte
+// abnormal code; on other errors nothing follows. A single conn.Read could
+// return a partial frame and leave the rest to corrupt the next read.
+func readResponse1E(conn net.Conn, dataLen int) ([]byte, error) {
+	header := make([]byte, 2)
+	if _, err := io.ReadFull(conn, header); err != nil {
+		return nil, fmt.Errorf("read 1E response header: %w", err)
+	}
+	switch header[1] {
+	case 0x00:
+		resp := make([]byte, 2+dataLen)
+		copy(resp, header)
+		if _, err := io.ReadFull(conn, resp[2:]); err != nil {
+			return nil, fmt.Errorf("read 1E response body: %w", err)
+		}
+		return resp, nil
+	case 0x5B:
+		resp := make([]byte, 3)
+		copy(resp, header)
+		if _, err := io.ReadFull(conn, resp[2:]); err != nil {
+			return nil, fmt.Errorf("read 1E abnormal code: %w", err)
+		}
+		return resp, nil
+	default:
+		return header, nil
+	}
+}
+
+// checkEndCode returns an error if a 3E response carries a non-zero end
+// code, i.e. the PLC rejected the request.
+func checkEndCode(resp []byte, what string) error {
+	if len(resp) < 11 {
+		return fmt.Errorf("%s: response too short (%d bytes)", what, len(resp))
+	}
+	if end := binary.LittleEndian.Uint16(resp[9:11]); end != 0 {
+		return fmt.Errorf("%s: PLC end code 0x%04X", what, end)
+	}
+	return nil
+}
+
 func (c *client3E) dropConn() {
 	if c.conn != nil {
 		c.conn.Close()
@@ -150,7 +197,14 @@ func (c *client3E) Write(deviceName string, offset, numPoints int64, writeData [
 	if err != nil {
 		return nil, err
 	}
-	return c.exchange(payload)
+	resp, err := c.exchange(payload)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkEndCode(resp, fmt.Sprintf("write %s%d", deviceName, offset)); err != nil {
+		return resp, err
+	}
+	return resp, nil
 }
 
 // WriteBits writes one or more points in bit units (1401 / sub 0001).
@@ -167,10 +221,8 @@ func (c *client3E) WriteBits(deviceName string, offset int64, bits []byte) ([]by
 	if err != nil {
 		return nil, err
 	}
-	if len(resp) >= 11 {
-		if end := binary.LittleEndian.Uint16(resp[9:11]); end != 0 {
-			return resp, fmt.Errorf("bit write %s%d: PLC end code 0x%04X", deviceName, offset, end)
-		}
+	if err := checkEndCode(resp, fmt.Sprintf("bit write %s%d", deviceName, offset)); err != nil {
+		return resp, err
 	}
 	return resp, nil
 }
@@ -186,7 +238,7 @@ func (c *client3E) exchange(payload []byte) ([]byte, error) {
 	if c.conn == nil {
 		conn, err := net.DialTimeout("tcp", c.tcpAddr.String(), ioTimeout)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("connect PLC %s: %w", c.tcpAddr.String(), err)
 		}
 		c.conn = conn
 	}

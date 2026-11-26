@@ -19,37 +19,26 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the binary (adjust the main package path if needed)
-RUN go build -o main ./cmd/
+RUN go build -trimpath -ldflags="-s -w" -o main ./cmd/
 
 # --- Stage 2: Runtime ---
-FROM gcr.io/distroless/base-debian11
+# Static binary, no shell, runs as uid 65532 (nonroot).
+# Mounted certificates must be readable by that user.
+FROM gcr.io/distroless/static-debian12:nonroot
 
-# Copy built binary
 COPY --from=builder /app/main /app/main
 
-# Working directory and port
 WORKDIR /app
-EXPOSE 8080
+USER nonroot:nonroot
 
-# Run the app
 ENTRYPOINT ["/app/main"]
 
-
-# Build Image with command
-# docker buildx create --use
-# docker buildx build \
-#   --platform linux/amd64,linux/arm64 \
-#   -t mochigome/msp-go:2.2v.ecs \
-#   --push .
-
-# legacy build
-# docker build -t msp-go:2.22v.ecs .
-# docker tag  msp-go:2.22v.ecs mochigome/msp-go:2.22v.ecs
-# docker push mochigome/msp-go:2.22v.ecs
-
-# AWS ECR
-# docker tag msp-go:2.22v.ecs 590183751536.dkr.ecr.ap-southeast-1.amazonaws.com/msp-go:2.22v.ecs
-# docker push 590183751536.dkr.ecr.ap-southeast-1.amazonaws.com/msp-go:2.22v.ecs
-
-# current version : 2.22v.ecs
+# Multi-arch build:
+#   docker buildx create --use
+#   docker buildx build --platform linux/amd64,linux/arm64 -t mochigome/msp-go:<version> --push .
+#
+# Single-arch build:
+#   docker build -t mochigome/msp-go:<version> .
+#   docker push mochigome/msp-go:<version>
+#
+# AWS ECR: see script/deploy-ecr.sh

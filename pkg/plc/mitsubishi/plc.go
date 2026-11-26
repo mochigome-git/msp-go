@@ -1,6 +1,5 @@
 // Package mitsubishi implements PLCClient for Mitsubishi Electric PLCs
-// using the MC Protocol (SLMP) 3E frame over TCP.
-// This is your original pkg/plc code — only the package declaration changed.
+// using the MC Protocol (SLMP): 3E frame over TCP, or 1E frame for FX series.
 package mitsubishi
 
 import (
@@ -13,11 +12,6 @@ import (
 	"github.com/mochigome-git/msp-go/pkg/mcp"
 )
 
-// Compile-time check: MSPClient must satisfy pkg/plc.PLCClient.
-// If the interface changes, this line will fail loudly at build time.
-// (import the plc package here only for the check; remove if it causes
-//  an import cycle — the interface duck-types automatically in Go)
-
 // MSPClient wraps the MC Protocol client for Mitsubishi PLCs.
 type MSPClient struct {
 	client  mcp.Client
@@ -26,22 +20,6 @@ type MSPClient struct {
 
 // SetTextEncoding sets how data type 4 (text) registers are decoded.
 func (m *MSPClient) SetTextEncoding(enc TextEncoding) { m.textEnc = enc }
-
-var msp *MSPClient
-
-// InitMSPClient initializes a package-level singleton MSP client.
-// Kept for backward compatibility. Prefer NewMSPClient for new code.
-func InitMSPClient(plcHost string, plcPort int) error {
-	if msp != nil {
-		return nil
-	}
-	client, err := mcp.New3EClient(plcHost, plcPort, mcp.NewLocalStation())
-	if err != nil {
-		return err
-	}
-	msp = &MSPClient{client: client}
-	return nil
-}
 
 // NewMSPClient creates a new Mitsubishi MC Protocol client.
 func NewMSPClient(plcHost string, plcPort int) (*MSPClient, error) {
@@ -119,20 +97,8 @@ func (m *MSPClient) WriteData(deviceType, deviceNumber string, writeData []byte,
 	return err
 }
 
-// WriteData sends data to the PLC for the specified device.
-// deviceType: device code (e.g. "D", "M", "Y").
-// deviceNumber: starting device address (string, can be decimal or hex depending on device).
-// numberRegisters: number of points to write.
-// writeData: the data to be written as a byte slice.
-// BatchWrite get wrap-around (overflow) and jump to lower device (reverse)
-// BatchWrite writes using the package-level MSP client initialized via InitMSPClient.
-func BatchWrite(deviceType, startDevice string, writeData []byte, maxRegistersPerWrite uint16, logger *log.Logger) error {
-	if msp == nil {
-		return fmt.Errorf("MSP client not initialized")
-	}
-	return msp.BatchWrite(deviceType, startDevice, writeData, maxRegistersPerWrite, logger)
-}
-
+// BatchWrite writes writeData starting at startDevice, split into requests
+// of at most maxRegistersPerWrite words. logger may be nil.
 func (m *MSPClient) BatchWrite(deviceType, startDevice string, writeData []byte, maxRegistersPerWrite uint16, logger *log.Logger) error {
 	if m == nil || m.client == nil {
 		return fmt.Errorf("MSP client not initialized")
@@ -215,5 +181,13 @@ func IncrementDevice(device string, offset int64) (string, error) {
 }
 
 func (m *MSPClient) EncodeData(valueStr string, processNumber int) ([]byte, error) {
-	return EncodeData(valueStr, processNumber) // calls conversion.go
+	return EncodeData(valueStr, processNumber)
+}
+
+// Close closes the TCP connection to the PLC.
+func (m *MSPClient) Close() error {
+	if m == nil || m.client == nil {
+		return nil
+	}
+	return m.client.Close()
 }
